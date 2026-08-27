@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
-import { ForgejoProvider } from "./index.js";
+import { ForgejoProvider } from "./index.ts";
 
 let baseUrl = "";
 let server: ReturnType<typeof createServer>;
