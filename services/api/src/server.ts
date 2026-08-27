@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { CreateBranchInput, ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
+import { branchWriteAuditEvent, type WriteAuditSink } from "./audit.js";
 
 export interface CodeServerOptions {
   corsOrigin?: string;
   authorizeWrite?: (authorizationHeader: string | undefined) => boolean | Promise<boolean>;
+  recordWriteAudit?: WriteAuditSink;
 }
 
 const MAX_WRITE_BODY_BYTES = 8 * 1024;
@@ -22,6 +25,10 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
             service: "goreecloud-code-api",
             ok: true,
             provider: await provider.health(),
+            governedWrites: {
+              authorizationConfigured: Boolean(options.authorizeWrite),
+              auditConfigured: Boolean(options.recordWriteAudit),
+            },
           }, options);
         }
 
@@ -49,17 +56,49 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
       if (request.method === "POST") {
         const match = repositoryRoute(url.pathname);
         if (match?.resource === "branches") {
-          if (!options.authorizeWrite) {
-            return send(response, 503, { error: "write_authorization_unconfigured" }, options);
-          }
-          if (!(await options.authorizeWrite(request.headers.authorization))) {
-            return send(response, 403, { error: "write_authorization_failed" }, options);
+          if (!options.recordWriteAudit) {
+            return send(response, 503, { error: "write_audit_unconfigured" }, options);
           }
           if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
             return send(response, 415, { error: "application_json_required" }, options);
           }
+
           const input = parseCreateBranchInput(await readJsonBody(request));
-          return send(response, 201, { branch: await provider.createBranch(match.id, input) }, options);
+          const operationId = randomUUID();
+          try {
+            await options.recordWriteAudit(branchWriteAuditEvent(operationId, match.id, input, "attempted"));
+          } catch {
+            return send(response, 503, { error: "write_audit_unavailable" }, options);
+          }
+
+          if (!options.authorizeWrite) {
+            await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "denied", "write_authorization_unconfigured");
+            return send(response, 503, { error: "write_authorization_unconfigured", operationId }, options);
+          }
+          if (!(await options.authorizeWrite(request.headers.authorization))) {
+            await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "denied", "write_authorization_failed");
+            return send(response, 403, { error: "write_authorization_failed", operationId }, options);
+          }
+
+          try {
+            const branch = await provider.createBranch(match.id, input);
+            const outcomeRecorded = await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "succeeded");
+            return send(response, 201, {
+              branch,
+              operationId,
+              audit: { attemptRecorded: true, outcomeRecorded },
+            }, options);
+          } catch (error) {
+            await recordAuditOutcome(
+              options.recordWriteAudit,
+              operationId,
+              match.id,
+              input,
+              "failed",
+              error instanceof Error ? error.message.slice(0, 240) : "provider_request_failed",
+            );
+            throw error;
+          }
         }
       }
 
@@ -72,6 +111,22 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
       }, options);
     }
   });
+}
+
+async function recordAuditOutcome(
+  sink: WriteAuditSink,
+  operationId: string,
+  repository: RepositoryId,
+  branch: CreateBranchInput,
+  phase: "succeeded" | "failed" | "denied",
+  reason?: string,
+): Promise<boolean> {
+  try {
+    await sink(branchWriteAuditEvent(operationId, repository, branch, phase, reason));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function repositoryRoute(pathname: string): { id: RepositoryId; resource?: string } | null {
