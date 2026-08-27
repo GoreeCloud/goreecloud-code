@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { CreateBranchInput, ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
-import { branchWriteAuditEvent, type WriteAuditSink } from "./audit.js";
+import { branchWriteAuditEvent, type WriteAuditSink } from "./audit.ts";
 
 export interface CodeServerOptions {
   corsOrigin?: string;
@@ -56,7 +56,8 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
       if (request.method === "POST") {
         const match = repositoryRoute(url.pathname);
         if (match?.resource === "branches") {
-          if (!options.recordWriteAudit) {
+          const auditSink = options.recordWriteAudit;
+          if (!auditSink) {
             return send(response, 503, { error: "write_audit_unconfigured" }, options);
           }
           if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
@@ -66,23 +67,23 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
           const input = parseCreateBranchInput(await readJsonBody(request));
           const operationId = randomUUID();
           try {
-            await options.recordWriteAudit(branchWriteAuditEvent(operationId, match.id, input, "attempted"));
+            await auditSink(branchWriteAuditEvent(operationId, match.id, input, "attempted"));
           } catch {
             return send(response, 503, { error: "write_audit_unavailable" }, options);
           }
 
           if (!options.authorizeWrite) {
-            await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "denied", "write_authorization_unconfigured");
+            await recordAuditOutcome(auditSink, operationId, match.id, input, "denied", "write_authorization_unconfigured");
             return send(response, 503, { error: "write_authorization_unconfigured", operationId }, options);
           }
           if (!(await options.authorizeWrite(request.headers.authorization))) {
-            await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "denied", "write_authorization_failed");
+            await recordAuditOutcome(auditSink, operationId, match.id, input, "denied", "write_authorization_failed");
             return send(response, 403, { error: "write_authorization_failed", operationId }, options);
           }
 
           try {
             const branch = await provider.createBranch(match.id, input);
-            const outcomeRecorded = await recordAuditOutcome(options.recordWriteAudit, operationId, match.id, input, "succeeded");
+            const outcomeRecorded = await recordAuditOutcome(auditSink, operationId, match.id, input, "succeeded");
             return send(response, 201, {
               branch,
               operationId,
@@ -90,7 +91,7 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
             }, options);
           } catch (error) {
             await recordAuditOutcome(
-              options.recordWriteAudit,
+              auditSink,
               operationId,
               match.id,
               input,
