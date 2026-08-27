@@ -1,0 +1,20 @@
+{
+  "name": "@goreecloud/code-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@goreecloud/code-contracts": "workspace:*",
+    "@goreecloud/code-forgejo": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.2"
+  }
+}
