@@ -21,6 +21,9 @@ export interface Repository extends RepositoryId {
   defaultBranch: string;
   private: boolean;
   webUrl: string;
+  cloneUrl?: string;
+  sshUrl?: string;
+  updatedAt?: string;
 }
 
 export interface Branch {
@@ -33,6 +36,7 @@ export interface Commit {
   sha: string;
   message: string;
   authoredAt: string;
+  authorName?: string;
   webUrl: string;
 }
 
@@ -40,6 +44,8 @@ export interface Issue {
   number: number;
   title: string;
   state: "open" | "closed";
+  author?: string;
+  updatedAt?: string;
   webUrl: string;
 }
 
@@ -49,6 +55,8 @@ export interface PullRequest {
   state: "open" | "closed" | "merged";
   base: string;
   head: string;
+  author?: string;
+  updatedAt?: string;
   webUrl: string;
 }
 
@@ -56,6 +64,9 @@ export interface ProviderHealth {
   provider: string;
   ok: boolean;
   version?: string;
+  baseUrl?: string;
+  latencyMs?: number;
+  error?: string;
   capabilities: ForgeCapability[];
 }
 
