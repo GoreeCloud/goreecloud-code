@@ -8,9 +8,9 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 **Milestone 1 — Forgejo Connectivity (in progress)**
 
-Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 now adds a runnable GoreeCloud-owned API service and the provider-neutral read path required to connect a real Forgejo deployment.
+Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 now includes the runnable GoreeCloud-owned API service, live Glaze UI repository dashboard, provider-neutral repository activity reads, and an end-to-end Forgejo validation stack.
 
-Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. Real-instance validation remains required before M1 is complete.
+Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. A real-instance validation run is still required before M1 is complete.
 
 ## Architecture
 
@@ -20,7 +20,8 @@ GoreeCloud Code
 ├── packages/contracts       Provider-neutral domain contracts
 ├── integrations/forgejo     Replaceable Forgejo provider
 ├── services/api             GoreeCloud-owned product API
-├── deploy/forgejo           Initial Forgejo deployment support
+├── deploy/forgejo           M1 Forgejo validation deployment
+├── scripts                  End-to-end validation tools
 └── docs                     Architecture, ADRs, security, migration
 ```
 
@@ -44,9 +45,9 @@ The browser must not receive Forgejo credentials or depend directly on Forgejo-s
 
 ## Local connectivity
 
-Configure the server using `.env.example`. At minimum, provide `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
+Configure the GoreeCloud Code API using `.env.example`. At minimum, provide `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
 
-The initial provider-neutral API includes:
+The provider-neutral API includes:
 
 - `GET /health`
 - `GET /api/v1/provider`
@@ -54,7 +55,18 @@ The initial provider-neutral API includes:
 - `GET /api/v1/repositories/:owner/:name`
 - repository branches, commits, issues, and pull-request read endpoints
 
-See `docs/architecture/m1-forgejo-connectivity.md` for the validation gate.
+For an isolated M1 test environment, use `deploy/forgejo/compose.yml` with `deploy/forgejo/.env.example`. This brings up Forgejo and PostgreSQL for local validation; it is not the production deployment architecture.
+
+Once Forgejo and the GoreeCloud Code API are running, validate the provider boundary with:
+
+```sh
+FORGEJO_BASE_URL=http://localhost:3000 \
+GOREECLOUD_CODE_API_URL=http://localhost:8787 \
+VALIDATE_REPOSITORY=owner/repository \
+pnpm validate:forgejo
+```
+
+See `docs/architecture/m1-forgejo-connectivity.md` for the full validation gate. M1 must not be marked complete until a real test run is recorded.
 
 ## Platform integrations
 
@@ -86,7 +98,7 @@ Complete foundation: monorepo, provider contracts, Forgejo adapter, web shell, A
 
 ### M1 — Forgejo connectivity
 
-In progress: real-instance authentication and validation, repository discovery/detail, branches, commits, issues, pull requests, and provider health.
+In progress: real-instance authentication and validation, repository discovery/detail, branches, commits, issues, pull requests, provider health, live web dashboard, and end-to-end validation tooling.
 
 ### M2 — Governed write operations
 
