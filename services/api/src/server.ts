@@ -77,12 +77,16 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
 function repositoryRoute(pathname: string): { id: RepositoryId; resource?: string } | null {
   const match = pathname.match(/^\/api\/v1\/repositories\/([^/]+)\/([^/]+)(?:\/(branches|commits|issues|pull-requests))?$/);
   if (!match) return null;
+  const owner = match[1];
+  const name = match[2];
+  if (!owner || !name) return null;
+  const resource = match[3];
   return {
     id: {
-      owner: decodeURIComponent(match[1]),
-      name: decodeURIComponent(match[2]),
+      owner: decodeURIComponent(owner),
+      name: decodeURIComponent(name),
     },
-    resource: match[3],
+    ...(resource ? { resource } : {}),
   };
 }
 
