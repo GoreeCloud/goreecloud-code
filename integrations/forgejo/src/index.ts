@@ -1,6 +1,7 @@
 import type {
   Branch,
   Commit,
+  CreateBranchInput,
   ForgeProvider,
   Issue,
   ProviderHealth,
@@ -29,16 +30,19 @@ export class ForgejoProvider implements ForgeProvider {
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
-  private async request<T>(path: string): Promise<T> {
+  private async request<T>(path: string, init: { method?: string; body?: string } = {}): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
       const response = await fetch(`${this.baseUrl}/api/v1${path}`, {
+        method: init.method ?? "GET",
         headers: {
           Accept: "application/json",
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
           ...(this.token ? { Authorization: `token ${this.token}` } : {}),
         },
+        body: init.body,
         signal: controller.signal,
       });
 
@@ -64,6 +68,7 @@ export class ForgejoProvider implements ForgeProvider {
         latencyMs: Date.now() - startedAt,
         capabilities: [
           "repositories:read",
+          ...(this.token ? ["repositories:write" as const] : []),
           "issues:read",
           "pullRequests:read",
         ],
@@ -101,11 +106,22 @@ export class ForgejoProvider implements ForgeProvider {
 
   async branches(id: RepositoryId): Promise<Branch[]> {
     const rows = await this.request<Array<Record<string, any>>>(`/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.name)}/branches?limit=100`);
-    return rows.map((row) => ({
-      name: String(row.name),
-      sha: String(row.commit?.id ?? ""),
-      protected: Boolean(row.protected),
-    }));
+    return rows.map(mapBranch);
+  }
+
+  async createBranch(id: RepositoryId, input: CreateBranchInput): Promise<Branch> {
+    if (!this.token) throw new Error("Forgejo branch creation requires FORGEJO_TOKEN");
+    const row = await this.request<Record<string, any>>(
+      `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.name)}/branches`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          new_branch_name: input.name,
+          old_ref_name: input.sourceRef,
+        }),
+      },
+    );
+    return mapBranch(row);
   }
 
   async commits(id: RepositoryId, ref?: string): Promise<Commit[]> {
@@ -145,6 +161,14 @@ export class ForgejoProvider implements ForgeProvider {
       webUrl: String(row.html_url ?? ""),
     }));
   }
+}
+
+function mapBranch(row: Record<string, any>): Branch {
+  return {
+    name: String(row.name),
+    sha: String(row.commit?.id ?? row.commit?.sha ?? ""),
+    protected: Boolean(row.protected),
+  };
 }
 
 function mapRepository(row: Record<string, any>): Repository {
