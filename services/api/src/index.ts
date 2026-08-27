@@ -2,15 +2,18 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ForgeProvider } from "@goreecloud/code-contracts";
 import { ForgejoProvider } from "@goreecloud/code-forgejo";
+import { createJsonlAuditSink } from "./audit.js";
 import { createCodeServer } from "./server.js";
 
 const port = numberEnv("PORT", 8787);
 const host = process.env.HOST ?? "0.0.0.0";
 const provider = createProvider();
 const writeToken = optionalSecretFile("GOREECLOUD_CODE_WRITE_TOKEN_FILE");
+const auditLogFile = process.env.GOREECLOUD_CODE_AUDIT_LOG_FILE?.trim();
 const server = createCodeServer(provider, {
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
   ...(writeToken ? { authorizeWrite: (authorization: string | undefined) => bearerMatches(authorization, writeToken) } : {}),
+  ...(auditLogFile ? { recordWriteAudit: createJsonlAuditSink(auditLogFile) } : {}),
 });
 
 server.listen(port, host, () => {
