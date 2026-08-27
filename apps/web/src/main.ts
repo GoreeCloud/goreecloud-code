@@ -1,5 +1,10 @@
 import "./style.css";
-import { goreeCloudCodeApi, type ProviderHealth, type Repository } from "./api";
+import {
+  goreeCloudCodeApi,
+  type ProviderHealth,
+  type Repository,
+  type RepositoryDetails,
+} from "./api";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("GoreeCloud Code root element is missing");
@@ -7,8 +12,11 @@ if (!app) throw new Error("GoreeCloud Code root element is missing");
 let repositories: Repository[] = [];
 let provider: ProviderHealth | null = null;
 let selectedRepository: Repository | null = null;
+let selectedDetails: RepositoryDetails | null = null;
 let loading = true;
+let detailLoading = false;
 let errorMessage = "";
+let detailErrorMessage = "";
 
 render();
 void loadDashboard();
@@ -27,9 +35,41 @@ async function loadDashboard() {
     repositories = repositoryResult;
     selectedRepository = repositories[0] ?? null;
   } catch (error) {
+    provider = null;
+    repositories = [];
+    selectedRepository = null;
+    selectedDetails = null;
     errorMessage = error instanceof Error ? error.message : "Unable to reach GoreeCloud Code API";
   } finally {
     loading = false;
+    render();
+  }
+
+  if (selectedRepository) await loadRepositoryDetails(selectedRepository);
+}
+
+async function selectRepository(repository: Repository) {
+  selectedRepository = repository;
+  selectedDetails = null;
+  detailErrorMessage = "";
+  render();
+  await loadRepositoryDetails(repository);
+}
+
+async function loadRepositoryDetails(repository: Repository) {
+  detailLoading = true;
+  detailErrorMessage = "";
+  render();
+
+  try {
+    const details = await goreeCloudCodeApi.repositoryDetails(repository);
+    if (selectedRepository?.id === repository.id) selectedDetails = details;
+  } catch (error) {
+    if (selectedRepository?.id === repository.id) {
+      detailErrorMessage = error instanceof Error ? error.message : "Unable to load repository activity";
+    }
+  } finally {
+    if (selectedRepository?.id === repository.id) detailLoading = false;
     render();
   }
 }
@@ -72,11 +112,15 @@ function render() {
   `;
 
   document.querySelector<HTMLButtonElement>("#refresh-button")?.addEventListener("click", () => void loadDashboard());
+  document.querySelector<HTMLButtonElement>("#retry-button")?.addEventListener("click", () => void loadDashboard());
+  document.querySelector<HTMLButtonElement>("#retry-details-button")?.addEventListener("click", () => {
+    if (selectedRepository) void loadRepositoryDetails(selectedRepository);
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-repository]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.repository);
-      selectedRepository = repositories[index] ?? null;
-      render();
+      const repository = repositories[index];
+      if (repository) void selectRepository(repository);
     });
   });
 }
@@ -103,7 +147,7 @@ function renderState(): string {
   }
 
   return `
-    <section class="hero compact">
+    <section class="hero compact" id="overview">
       <div>
         <p class="eyebrow">Connected workspace</p>
         <h2>Your repositories, without the platform lock-in.</h2>
@@ -125,7 +169,7 @@ function renderState(): string {
         ${repositories.length ? `<div class="repository-list">${repositories.map(renderRepository).join("")}</div>` : renderEmptyRepositories()}
       </div>
       <div class="panel detail-panel">
-        ${renderRepositoryPreview()}
+        ${renderRepositoryDetails()}
       </div>
     </section>`;
 }
@@ -140,31 +184,87 @@ function renderRepository(repository: Repository, index: number): string {
     </button>`;
 }
 
-function renderRepositoryPreview(): string {
+function renderRepositoryDetails(): string {
   if (!selectedRepository) {
     return `<div class="empty-detail"><p class="eyebrow">Repository details</p><h3>Select a repository</h3><p>Repository activity, branches, issues, changes, and security evidence will appear here.</p></div>`;
   }
 
-  return `
+  const header = `
     <div class="detail-heading">
       <div><p class="eyebrow">Repository</p><h3>${escapeHtml(selectedRepository.name)}</h3><p>${escapeHtml(selectedRepository.description ?? "No repository description")}</p></div>
       <span class="visibility">${selectedRepository.private ? "Private" : "Public"}</span>
-    </div>
+    </div>`;
+
+  if (detailLoading) {
+    return `${header}<div class="inline-state"><div class="spinner small"></div><p>Loading branches, commits, issues, and changes…</p></div>`;
+  }
+
+  if (detailErrorMessage) {
+    return `${header}<div class="inline-state detail-error"><strong>Repository activity unavailable</strong><p>${escapeHtml(detailErrorMessage)}</p><button id="retry-details-button" class="secondary" type="button">Retry activity</button></div>`;
+  }
+
+  if (!selectedDetails) return header;
+
+  const openIssues = selectedDetails.issues.filter((issue) => issue.state === "open").length;
+  const openPullRequests = selectedDetails.pullRequests.filter((pullRequest) => pullRequest.state === "open").length;
+  const latestCommit = selectedDetails.commits[0];
+
+  return `
+    ${header}
     <div class="detail-grid">
-      <div><span>Owner</span><strong>${escapeHtml(selectedRepository.owner)}</strong></div>
-      <div><span>Default branch</span><strong>${escapeHtml(selectedRepository.defaultBranch)}</strong></div>
-      <div><span>Provider ID</span><strong>${escapeHtml(selectedRepository.id)}</strong></div>
-      <div><span>Access</span><strong>Read connected</strong></div>
+      <div><span>Branches</span><strong>${selectedDetails.branches.length}</strong></div>
+      <div><span>Open issues</span><strong>${openIssues}</strong></div>
+      <div><span>Open changes</span><strong>${openPullRequests}</strong></div>
+      <div><span>Default branch</span><strong>${escapeHtml(selectedDetails.repository.defaultBranch)}</strong></div>
     </div>
+    <section class="activity-section">
+      <div class="activity-heading"><strong>Recent commits</strong><span>${selectedDetails.commits.length}</span></div>
+      ${selectedDetails.commits.length ? `<div class="activity-list">${selectedDetails.commits.slice(0, 5).map((commit) => `
+        <a class="activity-row" href="${escapeAttribute(commit.webUrl)}" target="_blank" rel="noreferrer">
+          <span class="commit-sha">${escapeHtml(commit.sha.slice(0, 7))}</span>
+          <span><strong>${escapeHtml(firstLine(commit.message))}</strong><small>${formatDate(commit.authoredAt)}</small></span>
+        </a>`).join("")}</div>` : `<p class="muted">No commits returned.</p>`}
+    </section>
+    <section class="activity-section split-activity">
+      <div>
+        <div class="activity-heading"><strong>Issues</strong><span>${selectedDetails.issues.length}</span></div>
+        ${renderIssueList()}
+      </div>
+      <div>
+        <div class="activity-heading"><strong>Changes</strong><span>${selectedDetails.pullRequests.length}</span></div>
+        ${renderPullRequestList()}
+      </div>
+    </section>
     <div class="detail-actions">
       <a class="button-link" href="${escapeAttribute(selectedRepository.webUrl)}" target="_blank" rel="noreferrer">Open provider repository</a>
-      <button class="secondary" type="button" disabled>Activity view next</button>
+      ${latestCommit ? `<span class="latest-commit">Latest ${escapeHtml(latestCommit.sha.slice(0, 7))}</span>` : ""}
     </div>
     <div class="boundary-note"><strong>GoreeCloud boundary</strong><p>This UI consumes GoreeCloud Code contracts, not Forgejo-specific browser APIs or credentials.</p></div>`;
 }
 
+function renderIssueList(): string {
+  if (!selectedDetails?.issues.length) return `<p class="muted">No issues returned.</p>`;
+  return `<div class="mini-list">${selectedDetails.issues.slice(0, 4).map((issue) => `
+    <a href="${escapeAttribute(issue.webUrl)}" target="_blank" rel="noreferrer"><span>#${issue.number}</span><strong>${escapeHtml(issue.title)}</strong><small>${issue.state}</small></a>`).join("")}</div>`;
+}
+
+function renderPullRequestList(): string {
+  if (!selectedDetails?.pullRequests.length) return `<p class="muted">No changes returned.</p>`;
+  return `<div class="mini-list">${selectedDetails.pullRequests.slice(0, 4).map((pullRequest) => `
+    <a href="${escapeAttribute(pullRequest.webUrl)}" target="_blank" rel="noreferrer"><span>#${pullRequest.number}</span><strong>${escapeHtml(pullRequest.title)}</strong><small>${pullRequest.state}</small></a>`).join("")}</div>`;
+}
+
 function renderEmptyRepositories(): string {
   return `<div class="empty-list"><strong>No repositories returned</strong><p>The provider is healthy, but no repositories are visible to the configured identity.</p></div>`;
+}
+
+function firstLine(value: string): string {
+  return value.split("\n", 1)[0] || "Untitled commit";
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown date" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function escapeHtml(value: string): string {
@@ -180,7 +280,3 @@ function escapeHtml(value: string): string {
 function escapeAttribute(value: string): string {
   return escapeHtml(value);
 }
-
-queueMicrotask(() => {
-  document.querySelector<HTMLButtonElement>("#retry-button")?.addEventListener("click", () => void loadDashboard());
-});
