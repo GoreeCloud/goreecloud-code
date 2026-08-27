@@ -1,0 +1,16 @@
+{
+  "name": "@goreecloud/code-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
