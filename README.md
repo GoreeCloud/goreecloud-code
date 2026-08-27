@@ -6,9 +6,11 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 ## Status
 
-**Milestone 0 — Bootstrap**
+**Milestone 1 — Forgejo Connectivity (in progress)**
 
-The current work establishes the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding.
+Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 now adds a runnable GoreeCloud-owned API service and the provider-neutral read path required to connect a real Forgejo deployment.
+
+Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. Real-instance validation remains required before M1 is complete.
 
 ## Architecture
 
@@ -16,24 +18,43 @@ The current work establishes the product boundary, provider abstraction, Forgejo
 GoreeCloud Code
 ├── apps/web                 Glaze UI developer experience
 ├── packages/contracts       Provider-neutral domain contracts
-├── integrations/forgejo     Forgejo provider implementation
-├── services/api             GoreeCloud-owned API boundary
+├── integrations/forgejo     Replaceable Forgejo provider
+├── services/api             GoreeCloud-owned product API
 ├── deploy/forgejo           Initial Forgejo deployment support
 └── docs                     Architecture, ADRs, security, migration
 ```
 
-The provider boundary is intentionally replaceable:
+The runtime boundary is intentionally replaceable:
 
 ```text
-GoreeCloud Code
-      │
-      ▼
- ForgeProvider
-      │
-      ├── ForgejoProvider      initial implementation
-      ├── GitHubProvider       migration/interoperability
-      └── NativeProvider       future GoreeCloud implementation
+Glaze UI / GoreeCloud clients
+            │
+            ▼
+     GoreeCloud Code API
+            │
+            ▼
+       ForgeProvider
+            │
+            ├── ForgejoProvider      initial implementation
+            ├── GitHubProvider       migration/interoperability
+            └── NativeProvider       future GoreeCloud implementation
 ```
+
+The browser must not receive Forgejo credentials or depend directly on Forgejo-specific APIs.
+
+## Local connectivity
+
+Configure the server using `.env.example`. At minimum, provide `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
+
+The initial provider-neutral API includes:
+
+- `GET /health`
+- `GET /api/v1/provider`
+- `GET /api/v1/repositories`
+- `GET /api/v1/repositories/:owner/:name`
+- repository branches, commits, issues, and pull-request read endpoints
+
+See `docs/architecture/m1-forgejo-connectivity.md` for the validation gate.
 
 ## Platform integrations
 
@@ -61,34 +82,16 @@ Public claims about these systems must remain tied to implemented capabilities a
 
 ### M0 — Bootstrap
 
-- Monorepo foundation
-- Provider-neutral contracts
-- Forgejo adapter skeleton
-- Web application shell
-- API boundary
-- CI and validation
-- Architecture decisions
+Complete foundation: monorepo, provider contracts, Forgejo adapter, web shell, API boundary, CI, and architecture decisions.
 
 ### M1 — Forgejo connectivity
 
-- Authenticate to a test Forgejo deployment
-- Repository discovery and detail views
-- Branch and commit reads
-- Issue and pull-request reads
-- Provider health and capability reporting
+In progress: real-instance authentication and validation, repository discovery/detail, branches, commits, issues, pull requests, and provider health.
 
 ### M2 — Governed write operations
 
-- Branch creation
-- Issue creation and updates
-- Pull-request creation
-- Review workflows
-- Bounded GoreeCloud AI operations
+Planned: branch creation, issue mutation, pull-request creation, review workflows, and bounded GoreeCloud AI operations.
 
 ### M3 — Pipelines, packages, and migration
 
-- Portable workflow execution
-- GoreeCloud-controlled runners
-- Package and OCI registry integration
-- GitHub migration/import tooling
-- External repository mirroring
+Planned: portable workflow execution, GoreeCloud-controlled runners, package/OCI registry integration, GitHub import tooling, and external repository mirroring.
