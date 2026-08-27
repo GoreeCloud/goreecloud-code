@@ -10,7 +10,7 @@ const provider = createProvider();
 const writeToken = optionalSecretFile("GOREECLOUD_CODE_WRITE_TOKEN_FILE");
 const server = createCodeServer(provider, {
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-  authorizeWrite: writeToken ? (authorization) => bearerMatches(authorization, writeToken) : undefined,
+  ...(writeToken ? { authorizeWrite: (authorization: string | undefined) => bearerMatches(authorization, writeToken) } : {}),
 });
 
 server.listen(port, host, () => {
@@ -19,10 +19,12 @@ server.listen(port, host, () => {
 
 function createProvider(): ForgeProvider {
   const baseUrl = requiredEnv("FORGEJO_BASE_URL");
+  const token = process.env.FORGEJO_TOKEN?.trim();
+  const username = process.env.FORGEJO_USERNAME?.trim();
   return new ForgejoProvider({
     baseUrl,
-    token: process.env.FORGEJO_TOKEN,
-    username: process.env.FORGEJO_USERNAME,
+    ...(token ? { token } : {}),
+    ...(username ? { username } : {}),
     timeoutMs: numberEnv("FORGEJO_TIMEOUT_MS", 10_000),
   });
 }
