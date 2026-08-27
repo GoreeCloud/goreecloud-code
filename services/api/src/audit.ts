@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CreateBranchInput, RepositoryId } from "@goreecloud/code-contracts";
@@ -44,6 +44,12 @@ export function createJsonlAuditSink(filePath: string): WriteAuditSink {
   if (!target) throw new Error("Audit log file path is required");
   return async (event) => {
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    await appendFile(target, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
+    const handle = await open(target, "a", 0o600);
+    try {
+      await handle.chmod(0o600);
+      await handle.appendFile(`${JSON.stringify(event)}\n`, "utf8");
+    } finally {
+      await handle.close();
+    }
   };
 }
