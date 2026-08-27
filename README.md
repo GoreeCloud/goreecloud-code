@@ -6,11 +6,11 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 ## Status
 
-**Milestone 1 — Forgejo Connectivity (in progress)**
+**Milestone 1 — Forgejo Connectivity (in progress), with the first Milestone 2 governed write boundary under development**
 
 Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 now includes the runnable GoreeCloud-owned API service, live Glaze UI repository dashboard, provider-neutral repository activity reads, and an end-to-end Forgejo validation stack.
 
-Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. A real-instance validation run is still required before M1 is complete.
+Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. A real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side write authorization; it does not mark M1 or M2 complete.
 
 ## Architecture
 
@@ -54,6 +54,9 @@ The provider-neutral API includes:
 - `GET /api/v1/repositories`
 - `GET /api/v1/repositories/:owner/:name`
 - repository branches, commits, issues, and pull-request read endpoints
+- `POST /api/v1/repositories/:owner/:name/branches` for the first bounded write operation
+
+Branch creation requires an explicit `name` and `sourceRef`, a Forgejo provider token, and application-level bearer authorization configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE`. If the write-authorization secret file is not configured, write routes fail closed. The write bearer token is a development authorization boundary, not the final GoreeCloud Identity/session design.
 
 For an isolated M1 test environment, use `deploy/forgejo/compose.yml` with `deploy/forgejo/.env.example`. This brings up Forgejo and PostgreSQL for local validation; it is not the production deployment architecture.
 
@@ -102,7 +105,7 @@ In progress: real-instance authentication and validation, repository discovery/d
 
 ### M2 — Governed write operations
 
-Planned: branch creation, issue mutation, pull-request creation, review workflows, and bounded GoreeCloud AI operations.
+Started: provider-neutral branch creation with explicit ref validation, server-side authorization, and Forgejo credential isolation. Issue mutation, pull-request creation, review workflows, GoreeCloud Identity-backed authorization, audit/evidence integration, and bounded GoreeCloud AI operations remain planned.
 
 ### M3 — Pipelines, packages, and migration
 
