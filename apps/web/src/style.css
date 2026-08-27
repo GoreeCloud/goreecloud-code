@@ -1,0 +1,42 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #f6f7fb;
+  background: #090b10;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 70% 0%, #172033 0, #090b10 36rem); }
+a { color: inherit; text-decoration: none; }
+button { border: 1px solid #2c3445; background: #f6f7fb; color: #0b0d12; border-radius: 12px; padding: 0.72rem 1rem; font: inherit; font-weight: 700; }
+
+.shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; }
+.sidebar { border-right: 1px solid #1d2430; padding: 1.5rem 1rem; background: rgba(8, 10, 15, 0.76); backdrop-filter: blur(20px); }
+.brand { font-weight: 800; letter-spacing: -0.03em; padding: 0.5rem 0.65rem 1.4rem; }
+.brand span { color: #9cbcff; }
+nav { display: grid; gap: 0.35rem; }
+nav a { color: #9ba5b7; padding: 0.7rem 0.75rem; border-radius: 10px; }
+nav a:hover, nav a.active { color: #fff; background: #171d28; }
+.content { padding: 2rem clamp(1.25rem, 4vw, 4rem); }
+.topbar { display: flex; justify-content: space-between; gap: 2rem; align-items: center; margin-bottom: 4rem; }
+.eyebrow { margin: 0 0 0.5rem; color: #91a1bc; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem; font-weight: 800; }
+h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
+.hero { max-width: 850px; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid #253149; border-radius: 28px; background: linear-gradient(135deg, rgba(40, 58, 92, 0.46), rgba(14, 17, 24, 0.82)); box-shadow: 0 30px 100px rgba(0,0,0,.28); }
+.hero h2 { margin: 0 0 1rem; font-size: clamp(2.2rem, 7vw, 5rem); line-height: 0.98; letter-spacing: -0.055em; max-width: 12ch; }
+.hero p:last-child { margin: 0; max-width: 62ch; color: #b8c0ce; line-height: 1.7; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+.grid article { min-height: 132px; border: 1px solid #202838; border-radius: 18px; padding: 1rem; background: rgba(14,17,24,.72); display: flex; flex-direction: column; justify-content: space-between; }
+.grid span { color: #8996aa; font-size: .9rem; }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .content { padding-top: 1.25rem; }
+  .topbar { margin-bottom: 2rem; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .grid { grid-template-columns: 1fr; }
+}
