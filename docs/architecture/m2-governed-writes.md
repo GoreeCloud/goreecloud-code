@@ -1,6 +1,6 @@
 # M2 Governed Write Operations
 
-GoreeCloud Code owns authorization and evidence boundaries for product-level source-control writes. Forgejo remains replaceable infrastructure behind the provider adapter.
+GoreeCloud Code owns authorization, replay-safety, reconciliation, and application evidence boundaries for product-level source-control writes. Forgejo remains replaceable infrastructure behind the provider adapter.
 
 ## Current development slice
 
@@ -8,57 +8,56 @@ The first M2 write is branch creation:
 
 ```text
 client request
-  -> GoreeCloud Code input validation
-  -> local governed-write audit attempt record
+  -> bounded input and Idempotency-Key validation
   -> application-level write authorization
+  -> durable local idempotency reservation
+  -> local governed-write audit attempt record
   -> ForgeProvider.createBranch
   -> Forgejo provider adapter
-  -> outcome audit record
+  -> durable idempotency outcome
+  -> audit outcome record
 ```
 
 Only branch creation is enabled. Issue mutation, pull-request creation/review, repository mutation, package publishing, pipeline writes, and AI-assisted writes remain disabled until their own authorization and evidence boundaries are implemented.
 
-## Dual authorization boundary
+## Authorization boundary
 
-A branch write requires both:
+A branch write requires both a Forgejo provider token with the minimum provider permission necessary to create the branch and the GoreeCloud Code application write gate configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE`.
 
-1. a Forgejo provider token with the minimum provider permission necessary to create the branch; and
-2. the GoreeCloud Code application write gate configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE` for the current development environment.
-
-The application bearer secret and Forgejo provider token are separate credentials. Neither is returned to the browser by the API. The current application token file is an interim development mechanism, not the final GoreeCloud Identity session/authorization design.
+The application bearer secret and Forgejo provider token are separate credentials. Neither is returned to the browser. The current application token file is an interim development mechanism, not the final GoreeCloud Identity session/authorization design.
 
 ## Audit requirement
 
-Branch mutation also requires `GOREECLOUD_CODE_AUDIT_LOG_FILE`. If the audit sink is not configured, or if the initial audit-attempt record cannot be written, the API fails closed before calling the provider.
+Branch mutation requires `GOREECLOUD_CODE_AUDIT_LOG_FILE`. If the audit sink is not configured, or if the pre-provider attempted event cannot be persisted, the provider is not called.
 
-The local audit record is deliberately data-minimized. It contains:
+The local audit record is data-minimized: generated event/operation IDs, event time, action, phase, normalized repository/branch operation, and a bounded reason where relevant. It excludes authorization headers, application bearer tokens, Forgejo tokens, cookies, unrestricted request bodies, and client network identity. The JSONL file is opened with `0600` permissions.
 
-- generated event and operation IDs;
-- event time;
-- action (`repository.branch.create`);
-- attempted/succeeded/failed/denied phase;
-- repository owner/name;
-- requested branch name and source ref; and
-- a bounded failure/denial reason where relevant.
+This application-owned file is not Wardveil Audit production acceptance.
 
-It does not record authorization headers, application bearer tokens, Forgejo tokens, cookies, request bodies beyond the normalized branch operation, or client network identity.
+## Idempotency and reconciliation
 
-The JSONL file is opened with `0600` permissions. The configured path should be application-owned and excluded from source control.
+Branch mutation also requires `GOREECLOUD_CODE_IDEMPOTENCY_FILE` and a client `Idempotency-Key` header. Accepted keys are bounded to 8–128 characters from the restricted `[A-Za-z0-9._:-]` set.
 
-## Outcome behavior
+The raw client key is never persisted. GoreeCloud Code stores its SHA-256 digest plus a SHA-256 fingerprint of the normalized repository/branch operation, operation ID, state, and successful branch result where applicable. The journal is append-only JSONL, bounded in size, created through an application-owned path, and opened with `0600` permissions.
 
-The pre-mutation `attempted` audit record is mandatory. If it cannot be recorded, no provider mutation occurs.
+Current states are:
 
-Outcome records are written after authorization/provider completion. The success response exposes an operation ID and whether the post-operation outcome record was successfully persisted. A missing outcome record does not erase the already-recorded pre-mutation evidence and does not cause the API to retry or duplicate a provider mutation.
+- `in_progress` — a durable pre-execution reservation exists;
+- `succeeded` — the exact operation completed and its provider result is durable; and
+- `uncertain` — the provider may have executed but final certainty was lost.
 
-This local JSONL mechanism is a development evidence foundation only. It is not a claim that Wardveil Audit, GoreeCloud Mesh evidence delivery, durable centralized audit retention, actor identity, tamper-evident storage, distributed idempotency, or production incident reconstruction is complete.
+A completed matching key replays the stored result without calling the provider again. Reuse of the key for a different operation returns a conflict. `in_progress` and `uncertain` records block another mutation and require reconciliation instead of blind retry.
+
+If the provider succeeds but the success record cannot be made durable, the API returns a reconciliation-required failure rather than silently treating the operation as safely repeatable. If the provider call itself fails after reservation, the operation is marked uncertain when possible and remains blocked from blind retry.
+
+The journal uses process-local serialization to prevent same-process reservation races. This is not a distributed lock, globally durable replay service, Wardveil execution claim, or production reconciliation service.
 
 ## Input controls
 
-The branch route accepts only JSON, applies a small bounded request body, and validates both the new branch and source ref against Git-incompatible/ref-dangerous forms before invoking the provider.
+The branch route accepts only JSON, applies an 8 KiB request-body limit, validates both new branch and source refs against Git-incompatible/ref-dangerous forms, and exposes the `idempotency-key` header in the CORS allowlist.
 
 ## Validation boundary
 
-Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, data minimization, audit-file permissions, malformed refs, and API routing.
+Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, malformed refs, and API routing.
 
-Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded, and M2 is not complete until target-environment authorization, audit, least-privilege, Wardveil, identity, and recovery evidence exists.
+Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, and deployment evidence exist.
