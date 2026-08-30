@@ -3,11 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL } from "node:url";
 import type { CreateBranchInput, ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
 import { branchWriteAuditEvent, type WriteAuditSink } from "./audit.ts";
+import type { BranchWriteIdempotencyStore } from "./idempotency.ts";
 
 export interface CodeServerOptions {
   corsOrigin?: string;
   authorizeWrite?: (authorizationHeader: string | undefined) => boolean | Promise<boolean>;
   recordWriteAudit?: WriteAuditSink;
+  idempotency?: BranchWriteIdempotencyStore;
 }
 
 const MAX_WRITE_BODY_BYTES = 8 * 1024;
@@ -28,6 +30,7 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
             governedWrites: {
               authorizationConfigured: Boolean(options.authorizeWrite),
               auditConfigured: Boolean(options.recordWriteAudit),
+              idempotencyConfigured: Boolean(options.idempotency),
             },
           }, options);
         }
@@ -57,48 +60,106 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
         const match = repositoryRoute(url.pathname);
         if (match?.resource === "branches") {
           const auditSink = options.recordWriteAudit;
-          if (!auditSink) {
-            return send(response, 503, { error: "write_audit_unconfigured" }, options);
-          }
+          if (!auditSink) return send(response, 503, { error: "write_audit_unconfigured" }, options);
+          const idempotency = options.idempotency;
+          if (!idempotency) return send(response, 503, { error: "write_idempotency_unconfigured" }, options);
           if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
             return send(response, 415, { error: "application_json_required" }, options);
           }
 
           const input = parseCreateBranchInput(await readJsonBody(request));
-          const operationId = randomUUID();
-          try {
-            await auditSink(branchWriteAuditEvent(operationId, match.id, input, "attempted"));
-          } catch {
-            return send(response, 503, { error: "write_audit_unavailable" }, options);
-          }
+          const idempotencyKey = parseIdempotencyKey(request.headers["idempotency-key"]);
 
           if (!options.authorizeWrite) {
+            const operationId = randomUUID();
+            if (!(await recordAuditAttempt(auditSink, operationId, match.id, input))) {
+              return send(response, 503, { error: "write_audit_unavailable" }, options);
+            }
             await recordAuditOutcome(auditSink, operationId, match.id, input, "denied", "write_authorization_unconfigured");
             return send(response, 503, { error: "write_authorization_unconfigured", operationId }, options);
           }
           if (!(await options.authorizeWrite(request.headers.authorization))) {
+            const operationId = randomUUID();
+            if (!(await recordAuditAttempt(auditSink, operationId, match.id, input))) {
+              return send(response, 503, { error: "write_audit_unavailable" }, options);
+            }
             await recordAuditOutcome(auditSink, operationId, match.id, input, "denied", "write_authorization_failed");
             return send(response, 403, { error: "write_authorization_failed", operationId }, options);
           }
 
+          const requestedOperationId = randomUUID();
+          let reservation;
+          try {
+            reservation = await idempotency.reserve(idempotencyKey, requestedOperationId, match.id, input);
+          } catch {
+            return send(response, 503, { error: "write_idempotency_unavailable" }, options);
+          }
+
+          if (reservation.kind === "conflict") {
+            await recordAuditOutcome(auditSink, requestedOperationId, match.id, input, "denied", "idempotency_key_conflict");
+            return send(response, 409, {
+              error: "idempotency_key_conflict",
+              operationId: reservation.operationId,
+            }, options);
+          }
+          if (reservation.kind === "unresolved") {
+            await recordAuditOutcome(auditSink, requestedOperationId, match.id, input, "denied", `idempotency_${reservation.state}`);
+            return send(response, 409, {
+              error: "idempotency_operation_unresolved",
+              operationId: reservation.operationId,
+              state: reservation.state,
+              reconciliationRequired: true,
+            }, options);
+          }
+          if (reservation.kind === "replay") {
+            await recordAuditOutcome(auditSink, reservation.operationId, match.id, input, "succeeded", "idempotency_replay");
+            return send(response, 200, {
+              branch: reservation.branch,
+              operationId: reservation.operationId,
+              idempotency: { replayed: true },
+            }, options);
+          }
+
+          const operationId = reservation.operationId;
+          if (!(await recordAuditAttempt(auditSink, operationId, match.id, input))) {
+            await idempotency.markUncertain(idempotencyKey, operationId, match.id, input, "audit_unavailable_after_reservation").catch(() => {});
+            return send(response, 503, {
+              error: "write_audit_unavailable",
+              operationId,
+              reconciliationRequired: true,
+            }, options);
+          }
+
           try {
             const branch = await provider.createBranch(match.id, input);
+            try {
+              await idempotency.markSucceeded(idempotencyKey, operationId, match.id, input, branch);
+            } catch {
+              await recordAuditOutcome(auditSink, operationId, match.id, input, "succeeded", "idempotency_outcome_persistence_failed");
+              return send(response, 503, {
+                error: "write_outcome_persistence_failed",
+                operationId,
+                branch,
+                reconciliationRequired: true,
+              }, options);
+            }
             const outcomeRecorded = await recordAuditOutcome(auditSink, operationId, match.id, input, "succeeded");
             return send(response, 201, {
               branch,
               operationId,
               audit: { attemptRecorded: true, outcomeRecorded },
+              idempotency: { replayed: false },
             }, options);
           } catch (error) {
-            await recordAuditOutcome(
-              auditSink,
+            const reason = error instanceof Error ? error.message.slice(0, 160) : "provider_request_failed";
+            await idempotency.markUncertain(idempotencyKey, operationId, match.id, input, reason).catch(() => {});
+            await recordAuditOutcome(auditSink, operationId, match.id, input, "failed", reason);
+            return send(response, 502, {
+              error: "provider_request_failed",
+              message: error instanceof Error ? error.message : "Unknown provider error",
               operationId,
-              match.id,
-              input,
-              "failed",
-              error instanceof Error ? error.message.slice(0, 240) : "provider_request_failed",
-            );
-            throw error;
+              reconciliationRequired: true,
+            }, options);
           }
         }
       }
@@ -112,6 +173,20 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
       }, options);
     }
   });
+}
+
+async function recordAuditAttempt(
+  sink: WriteAuditSink,
+  operationId: string,
+  repository: RepositoryId,
+  branch: CreateBranchInput,
+): Promise<boolean> {
+  try {
+    await sink(branchWriteAuditEvent(operationId, repository, branch, "attempted"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function recordAuditOutcome(
@@ -174,6 +249,13 @@ function parseCreateBranchInput(value: unknown): CreateBranchInput {
   return { name, sourceRef };
 }
 
+function parseIdempotencyKey(value: string | string[] | undefined): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(value)) {
+    throw httpError(400, "A valid Idempotency-Key header is required");
+  }
+  return value;
+}
+
 function validRef(value: string, branchName: boolean): boolean {
   if (!value || value.length > (branchName ? 255 : 512)) return false;
   if (value === "@" || value === "HEAD" || value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.endsWith(".")) return false;
@@ -203,7 +285,7 @@ function send(response: ServerResponse, status: number, body: unknown, options: 
   response.statusCode = status;
   response.setHeader("access-control-allow-origin", options.corsOrigin ?? "http://localhost:5173");
   response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type, authorization");
+  response.setHeader("access-control-allow-headers", "content-type, authorization, idempotency-key");
   response.setHeader("cache-control", "no-store");
 
   if (body === null) return response.end();
