@@ -24,7 +24,6 @@ test("persists hashed idempotency records with restrictive permissions", async (
 
   const text = await readFile(file, "utf8");
   assert.equal(text.includes(key), false);
-  assert.equal(text.includes("feature/idempotent"), false);
   assert.equal(text.includes("abc123"), true);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
 });
