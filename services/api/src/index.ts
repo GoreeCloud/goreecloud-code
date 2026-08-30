@@ -26,7 +26,7 @@ server.listen(port, host, () => {
 function createProvider(): ForgeProvider {
   const baseUrl = requiredEnv("FORGEJO_BASE_URL");
   const token = process.env.FORGEJO_TOKEN?.trim();
-  const username = process.env.FORGEEJO_USERNAME?.trim() ?? process.env.FORGEJO_USERNAME?.trim();
+  const username = process.env.FORGEJO_USERNAME?.trim();
   return new ForgejoProvider({
     baseUrl,
     ...(token ? { token } : {}),
