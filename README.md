@@ -10,6 +10,7 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 - [Features](FEATURES.md)
 - [Benefits](BENEFITS.md)
 - [Competitive objectives](COMPETITIVE-OBJECTIVES.md)
+- [User manual](USER-MANUAL.md)
 - [Branding authority](BRANDING.md)
 
 ## Status
@@ -18,7 +19,7 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 includes the runnable GoreeCloud-owned API service, repository dashboard, provider-neutral repository activity reads, deterministic provider/API tests, and an end-to-end Forgejo validation stack.
 
-A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, and durable development idempotency/reconciliation state. It does not mark M1 or M2 complete.
+A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, and durable development idempotency/reconciliation state. The validation tool can now opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
 
 ## Architecture
 
@@ -29,7 +30,7 @@ GoreeCloud Code
 ├── integrations/forgejo     replaceable Forgejo provider
 ├── services/api             GoreeCloud-owned product API and governed-write controls
 ├── deploy/forgejo           M1 Forgejo validation deployment
-├── scripts                  end-to-end validation tools
+├── scripts                  read-path and opt-in governed-write validation tools
 └── docs                     architecture, ADRs, security, migration
 ```
 
@@ -92,7 +93,29 @@ VALIDATE_REPOSITORY=owner/repository \
 pnpm validate:forgejo
 ```
 
-See `docs/architecture/m1-forgejo-connectivity.md`. M1 must not be marked complete until real-instance validation is recorded.
+With only the read-path variables, the validator exercises Forgejo version availability and provider-neutral repository reads through GoreeCloud Code.
+
+### Opt-in M2 branch-write validation
+
+Live write validation remains disabled unless an operator explicitly selects a disposable target branch and supplies the existing application write bearer:
+
+```sh
+FORGEJO_BASE_URL=http://localhost:3000 \
+GOREECLOUD_CODE_API_URL=http://localhost:8787 \
+VALIDATE_REPOSITORY=owner/repository \
+VALIDATE_WRITE_BRANCH=validation/unique-branch \
+VALIDATE_WRITE_SOURCE_REF=main \
+GOREECLOUD_CODE_WRITE_TOKEN='<protected-runtime-value>' \
+pnpm validate:forgejo
+```
+
+`VALIDATE_WRITE_IDEMPOTENCY_KEY` may be supplied explicitly; otherwise the validator creates a bounded random key for that run. The tool requires the first write to return a new operation, repeats the same request with the same key and requires an idempotent replay using the same operation ID, then confirms the created branch through the provider-neutral read route.
+
+The validator intentionally does not implement or exercise branch deletion. The operator must choose a disposable, uniquely named validation branch and handle later cleanup through an already approved administrative path. The validator does not intentionally print the Forgejo token, application write bearer, or raw idempotency key.
+
+The repository-level `pnpm check` command syntax-checks the validator so the opt-in live path cannot silently rot between target-environment runs.
+
+See `docs/architecture/m1-forgejo-connectivity.md` and `USER-MANUAL.md`. M1 must not be marked complete until real-instance validation is recorded, and M2 write interoperability is not accepted until the opt-in write path is successfully executed against an approved target and its evidence is recorded.
 
 ## Platform integrations and acceptance
 
@@ -128,7 +151,7 @@ In progress: real-instance authentication/validation, repository discovery/detai
 
 ### M2 — Governed write operations
 
-In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, and reconciliation-required uncertainty. Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, and live target validation remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
+In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, and opt-in live write/replay validation tooling. Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
 
 ### M3 — Pipelines, packages, and migration
 
