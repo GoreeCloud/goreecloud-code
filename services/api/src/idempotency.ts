@@ -141,7 +141,8 @@ export function createJsonlIdempotencyStore(filePath: string): BranchWriteIdempo
           if (first.fingerprint !== fingerprint || latest.fingerprint !== fingerprint) {
             return { kind: "conflict", operationId: latest.operationId };
           }
-          if (latest.state === "succeeded" && latest.result) {
+          if (latest.state === "succeeded") {
+            if (!latest.result) throw new Error("Succeeded idempotency record is missing its result");
             return { kind: "replay", operationId: latest.operationId, branch: latest.result };
           }
           return { kind: "unresolved", operationId: latest.operationId, state: latest.state };
