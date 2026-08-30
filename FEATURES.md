@@ -10,6 +10,8 @@
 - Data-minimized local JSONL audit attempt/outcome records with restrictive permissions.
 - Durable local idempotency reservation, completed-result replay, conflict detection, uncertain-state blocking, and reconciliation-required behavior.
 - Development/test Forgejo validation stack and deterministic CI tests.
+- Opt-in live M2 validation for an explicitly selected branch-create operation, same-key replay verification, and provider-neutral branch readback without branch-deletion authority.
+- Root user manual plus a synchronized central GoreeCloud User Manuals copy.
 - Unified GoreeCloud branding authority reference.
 
 ## Under active development
