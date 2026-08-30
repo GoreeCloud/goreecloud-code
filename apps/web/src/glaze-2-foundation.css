@@ -1,0 +1,59 @@
+/* Glaze UI 2.0 adoption foundation.
+   This file implements baseline consumer behavior only; it is not a conformance claim. */
+
+:where(button, .button-link, nav a, .repository-row, .activity-row, .mini-list a) {
+  min-height: 48px;
+}
+
+:where(button, .button-link, nav a, .repository-row, .activity-row, .mini-list a):focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sidebar,
+  .hero,
+  .panel,
+  .state-card,
+  .provider-badge {
+    background: #0f141d;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .spinner {
+    animation: none;
+    border-top-color: currentColor;
+  }
+}
+
+@media (forced-colors: active) {
+  .hero,
+  .panel,
+  .state-card,
+  .provider-badge,
+  .repository-row,
+  .activity-row,
+  .mini-list a,
+  button,
+  .button-link {
+    forced-color-adjust: auto;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .provider-dot,
+  .provider-dot.online,
+  .provider-badge span {
+    border: 1px solid ButtonText;
+  }
+}
