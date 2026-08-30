@@ -37,7 +37,10 @@ function memoryIdempotencyStore(): BranchWriteIdempotencyStore {
         return { kind: "reserved", operationId };
       }
       if (current.fingerprint !== nextFingerprint) return { kind: "conflict", operationId: current.operationId };
-      if (current.state === "succeeded" && current.result) return { kind: "replay", operationId: current.operationId, branch: current.result };
+      if (current.state === "succeeded") {
+        if (!current.result) throw new Error("Succeeded test idempotency record is missing its result");
+        return { kind: "replay", operationId: current.operationId, branch: current.result };
+      }
       return { kind: "unresolved", operationId: current.operationId, state: current.state };
     },
     async markSucceeded(key, operationId, id, input, result) {
