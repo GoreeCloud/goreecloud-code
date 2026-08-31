@@ -26,14 +26,15 @@ const provider: ForgeProvider = {
 };
 
 function memoryIdempotencyStore(): BranchWriteIdempotencyStore {
-  const records = new Map<string, { fingerprint: string; operationId: string; state: "in_progress" | "succeeded" | "uncertain"; result?: Branch }>();
+  const records = new Map<string, { fingerprint: string; operationId: string; state: "in_progress" | "succeeded" | "uncertain"; observedAt: string; result?: Branch }>();
   const fingerprint = (id: RepositoryId, input: CreateBranchInput) => JSON.stringify({ id, input });
+  const now = () => new Date().toISOString();
   return {
     async reserve(key, operationId, id, input): Promise<BranchWriteReserveResult> {
       const current = records.get(key);
       const nextFingerprint = fingerprint(id, input);
       if (!current) {
-        records.set(key, { fingerprint: nextFingerprint, operationId, state: "in_progress" });
+        records.set(key, { fingerprint: nextFingerprint, operationId, state: "in_progress", observedAt: now() });
         return { kind: "reserved", operationId };
       }
       if (current.fingerprint !== nextFingerprint) return { kind: "conflict", operationId: current.operationId };
@@ -44,10 +45,21 @@ function memoryIdempotencyStore(): BranchWriteIdempotencyStore {
       return { kind: "unresolved", operationId: current.operationId, state: current.state };
     },
     async markSucceeded(key, operationId, id, input, result) {
-      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "succeeded", result });
+      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "succeeded", observedAt: now(), result });
     },
     async markUncertain(key, operationId, id, input) {
-      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "uncertain" });
+      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "uncertain", observedAt: now() });
+    },
+    async lookupOperation(operationId) {
+      const record = [...records.values()].find((candidate) => candidate.operationId === operationId);
+      if (!record) return null;
+      return {
+        operationId: record.operationId,
+        state: record.state,
+        observedAt: record.observedAt,
+        reconciliationRequired: record.state !== "succeeded",
+        ...(record.state === "succeeded" && record.result ? { branch: record.result } : {}),
+      };
     },
   };
 }
@@ -123,6 +135,34 @@ test("rejects reuse of an idempotency key for a different operation", async () =
   assert.equal(response.status, 409);
   assert.equal((await response.json() as any).error, "idempotency_key_conflict");
   assert.equal(createBranchCalls, 1);
+});
+
+test("exposes bearer-protected data-minimized governed-write operation status", async () => {
+  const created = await branchRequest("request-status-0001", { name: "feature/status", sourceRef: "main" });
+  assert.equal(created.status, 201);
+  const createdPayload = await created.json() as any;
+  const operationId = createdPayload.operationId as string;
+
+  const unauthorized = await fetch(`${baseUrl}/api/v1/governed-writes/${operationId}`);
+  assert.equal(unauthorized.status, 403);
+  assert.equal((await unauthorized.json() as any).error, "write_authorization_failed");
+
+  const statusResponse = await fetch(`${baseUrl}/api/v1/governed-writes/${operationId}`, {
+    headers: { authorization: "Bearer test-write-token" },
+  });
+  assert.equal(statusResponse.status, 200);
+  const status = await statusResponse.json() as any;
+  assert.equal(status.operation.operationId, operationId);
+  assert.equal(status.operation.state, "succeeded");
+  assert.equal(status.operation.reconciliationRequired, false);
+  assert.deepEqual(status.operation.branch, { name: "feature/status", sha: "def", protected: false });
+  assert.equal(JSON.stringify(status).includes("request-status-0001"), false);
+
+  const missing = await fetch(`${baseUrl}/api/v1/governed-writes/00000000-0000-4000-8000-000000000001`, {
+    headers: { authorization: "Bearer test-write-token" },
+  });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json() as any).error, "governed_write_operation_not_found");
 });
 
 test("requires a bounded Idempotency-Key header", async () => {
@@ -214,6 +254,7 @@ test("fails closed before provider mutation when idempotency storage is unavaila
     async reserve() { throw new Error("disk unavailable"); },
     async markSucceeded() {},
     async markUncertain() {},
+    async lookupOperation() { throw new Error("disk unavailable"); },
   };
   const lockedServer = createCodeServer(provider, {
     authorizeWrite: () => true,
@@ -225,6 +266,23 @@ test("fails closed before provider mutation when idempotency storage is unavaila
     assert.equal(response.status, 503);
     assert.equal((await response.json() as any).error, "write_idempotency_unavailable");
     assert.equal(createdBranch, null);
+  });
+});
+
+test("governed-write status fails closed when authorization or idempotency is unavailable", async () => {
+  const operationId = "00000000-0000-4000-8000-000000000002";
+  const authorizationMissing = createCodeServer(provider, { idempotency: memoryIdempotencyStore() });
+  await withServer(authorizationMissing, async (url) => {
+    const response = await fetch(`${url}/api/v1/governed-writes/${operationId}`);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_authorization_unconfigured");
+  });
+
+  const idempotencyMissing = createCodeServer(provider, { authorizeWrite: () => true });
+  await withServer(idempotencyMissing, async (url) => {
+    const response = await fetch(`${url}/api/v1/governed-writes/${operationId}`);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_idempotency_unconfigured");
   });
 });
 
