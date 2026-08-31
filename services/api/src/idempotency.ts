@@ -31,6 +31,14 @@ export type BranchWriteReserveResult =
   | BranchWriteConflict
   | BranchWriteUnresolved;
 
+export interface BranchWriteOperationStatus {
+  operationId: string;
+  state: "in_progress" | "succeeded" | "uncertain";
+  observedAt: string;
+  reconciliationRequired: boolean;
+  branch?: Branch;
+}
+
 export interface BranchWriteIdempotencyStore {
   reserve(
     key: string,
@@ -52,6 +60,7 @@ export interface BranchWriteIdempotencyStore {
     branch: CreateBranchInput,
     reason?: string,
   ): Promise<void>;
+  lookupOperation(operationId: string): Promise<BranchWriteOperationStatus | null>;
 }
 
 type JournalState = "in_progress" | "succeeded" | "uncertain";
@@ -179,6 +188,22 @@ export function createJsonlIdempotencyStore(filePath: string): BranchWriteIdempo
         state: "uncertain",
         ...(reason ? { reason: reason.slice(0, 160) } : {}),
       }));
+    },
+    lookupOperation(operationId) {
+      return serialized(async () => {
+        const normalized = operationId.trim();
+        if (!normalized) return null;
+        const matching = (await load()).filter((record) => record.operationId === normalized);
+        if (!matching.length) return null;
+        const latest = matching[matching.length - 1]!;
+        return {
+          operationId: latest.operationId,
+          state: latest.state,
+          observedAt: latest.observedAt,
+          reconciliationRequired: latest.state !== "succeeded",
+          ...(latest.state === "succeeded" && latest.result ? { branch: latest.result } : {}),
+        };
+      });
     },
   };
 }
