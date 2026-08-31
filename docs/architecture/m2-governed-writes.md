@@ -18,13 +18,17 @@ client request
   -> audit outcome record
 ```
 
-Only branch creation is enabled. Issue mutation, pull-request creation/review, repository mutation, package publishing, pipeline writes, and AI-assisted writes remain disabled until their own authorization and evidence boundaries are implemented.
+A separate protected read-only status route may inspect the durable local operation state after an operation ID has been returned.
+
+Only branch creation is enabled. Issue mutation, pull-request creation/review, repository mutation, package publishing, pipeline writes, reconciliation mutation, and AI-assisted writes remain disabled until their own authorization and evidence boundaries are implemented.
 
 ## Authorization boundary
 
 A branch write requires both a Forgejo provider token with the minimum provider permission necessary to create the branch and the GoreeCloud Code application write gate configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE`.
 
 The application bearer secret and Forgejo provider token are separate credentials. Neither is returned to the browser. The current application token file is an interim development mechanism, not the final GoreeCloud Identity session/authorization design.
+
+The governed-write operation-status route also requires the interim application bearer. It does not require or expose the Forgejo provider token because the status is read from GoreeCloud Code's application-owned journal rather than by issuing a provider mutation.
 
 ## Audit requirement
 
@@ -52,12 +56,28 @@ If the provider succeeds but the success record cannot be made durable, the API 
 
 The journal uses process-local serialization to prevent same-process reservation races. This is not a distributed lock, globally durable replay service, Wardveil execution claim, or production reconciliation service.
 
+## Read-only operation status
+
+`GET /api/v1/governed-writes/:operationId` accepts canonical UUID operation IDs and reads the latest matching journal record under the same local serialization boundary used by journal mutations.
+
+The response is intentionally data-minimized. It may include:
+
+- operation ID;
+- current state;
+- latest observation time;
+- whether reconciliation is required; and
+- the stored branch result only when the operation is durably `succeeded`.
+
+The response does not expose raw idempotency keys, key digests, operation fingerprints, authorization credentials, provider credentials, or the persisted provider-failure reason.
+
+The route is observational only. It cannot move an operation between states, call the provider, retry a request, delete a branch, or resolve uncertainty. `in_progress` and `uncertain` remain blocked/reconciliation-required until a separately authorized authoritative reconciliation capability exists.
+
 ## Input controls
 
-The branch route accepts only JSON, applies an 8 KiB request-body limit, validates both new branch and source refs against Git-incompatible/ref-dangerous forms, and exposes the `idempotency-key` header in the CORS allowlist.
+The branch route accepts only JSON, applies an 8 KiB request-body limit, validates both new branch and source refs against Git-incompatible/ref-dangerous forms, and exposes the `idempotency-key` header in the CORS allowlist. The status route accepts only canonical UUID operation identifiers in its path.
 
 ## Validation boundary
 
-Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, malformed refs, and API routing.
+Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, malformed refs, and API routing.
 
 Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, and deployment evidence exist.
