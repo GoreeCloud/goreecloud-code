@@ -2,7 +2,7 @@
 
 ## Status
 
-GoreeCloud Code is under active development. The current Draft Milestone 2 branch provides a first-party repository dashboard, provider-neutral repository reads, and one governed branch-creation write. It is not Stable or production-ready.
+GoreeCloud Code is under active development. The current Draft Milestone 2 branch provides a first-party repository dashboard, provider-neutral repository reads, one governed branch-creation write, and protected read-only inspection of governed-write operation state. It is not Stable or production-ready.
 
 Forgejo is the preferred initial forge infrastructure behind GoreeCloud Code. Browser clients use GoreeCloud Code APIs and do not receive Forgejo credentials.
 
@@ -16,10 +16,11 @@ The current development build supports:
 - the responsive GoreeCloud Code repository dashboard;
 - one governed branch-creation operation;
 - development audit and idempotency evidence for branch creation;
+- read-only governed-write status inspection using returned operation IDs;
 - local/test Forgejo connectivity validation;
 - opt-in live branch-write validation for an explicitly selected test repository and validation branch.
 
-Issue mutation, pull-request creation/review, repository administration, package publishing, pipeline writes, branch deletion, and GoreeCloud AI-assisted repository mutations remain disabled.
+Issue mutation, pull-request creation/review, repository administration, package publishing, pipeline writes, branch deletion, reconciliation mutation, and GoreeCloud AI-assisted repository mutations remain disabled.
 
 ## Running the Development Workspace
 
@@ -69,6 +70,24 @@ If the provider may have executed but outcome certainty is lost, GoreeCloud Code
 
 The local audit and idempotency files are development controls only. They are not substitutes for GoreeCloud Identity authorization, Wardveil Policy/Audit acceptance, GoreeCloud Mesh evidence delivery, Privacy Shield acceptance, Everkeep recovery acceptance, distributed reconciliation, or production evidence.
 
+## Inspecting Governed-Write Status
+
+A successful or unresolved governed write returns an operation ID. The current development API can inspect that ID with:
+
+`GET /api/v1/governed-writes/:operationId`
+
+The operation ID must be the canonical UUID returned by GoreeCloud Code. The request requires the same interim application bearer gate used for governed branch creation.
+
+The response can report:
+
+- `in_progress` — the local journal has a reservation but no terminal durable result;
+- `succeeded` — a durable result is present and may include the stored branch result;
+- `uncertain` — the provider may have executed but GoreeCloud Code does not have safe terminal certainty.
+
+The response also includes the latest observation timestamp and `reconciliationRequired`. The current endpoint intentionally does not return the raw idempotency key, key hash/fingerprint, provider token, application bearer, authorization headers, or stored provider-error reason.
+
+This endpoint is read-only. It does not reconcile, retry, cancel, delete, or repair an operation. Do not use an `in_progress` or `uncertain` status as permission to repeat the provider mutation. Authoritative reconciliation remains a future separately governed capability.
+
 ## Forgejo Validation
 
 The repository includes:
@@ -117,9 +136,9 @@ The current Draft branch still requires, among other evidence:
 - authoritative Wardveil policy, audit, and security evidence;
 - Privacy Shield runtime acceptance;
 - Everkeep continuity and recovery acceptance;
-- distributed idempotency and reconciliation;
+- distributed idempotency and authoritative reconciliation;
 - exact current Glaze UI consumer conformance evidence;
 - least-privilege and deployment validation;
 - recovery and reconciliation testing.
 
-Do not represent a successful local build or validation script as Stable or production-ready evidence.
+Do not represent a successful local build, operation-status read, or validation script as Stable or production-ready evidence.
