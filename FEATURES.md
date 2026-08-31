@@ -9,7 +9,9 @@
 - Separate application authorization and Forgejo provider authorization boundaries.
 - Data-minimized local JSONL audit attempt/outcome records with restrictive permissions.
 - Durable local idempotency reservation, completed-result replay, conflict detection, uncertain-state blocking, and reconciliation-required behavior.
+- Version-2 journal operation descriptors for new branch writes with version-1 read compatibility and no invented historical context.
 - Bearer-protected read-only governed-write operation status for `in_progress`, `succeeded`, and `uncertain` journal state without raw idempotency keys or stored provider-failure reasons.
+- Bearer-protected read-only reconciliation assessment using provider-neutral branch reads only; provider branch presence/absence never authorizes retry or automatic local-state resolution.
 - Development/test Forgejo validation stack and deterministic CI tests.
 - Opt-in live M2 validation for an explicitly selected branch-create operation, same-key replay verification, and provider-neutral branch readback without branch-deletion authority.
 - Root user manual plus a synchronized central GoreeCloud User Manuals copy.
@@ -18,9 +20,9 @@
 ## Under active development
 
 - Real-instance Forgejo acceptance evidence for Milestone 1 reads and Milestone 2 branch writes.
-- Authoritative reconciliation workflows for unresolved governed writes; current status inspection is observational only.
-- Glaze UI 2.0.0 consumer migration and exact-revision conformance evidence.
-- GoreeCloud Identity-backed user/service authorization.
+- Authoritative reconciliation mutation/workflows for unresolved governed writes; current reconciliation is assessment-only.
+- Migration to current Stable Glaze UI 2.1.0 and exact-revision consumer conformance evidence. Prior 2.0.0 alignment is historical and no longer current conformance.
+- GoreeCloud Identity-backed identity/session integration plus Code-owned user/service authorization.
 - Wardveil policy, audit/evidence, repository, runner, dependency, artifact, and deployment security integration.
 - Privacy Shield runtime data-use/minimization acceptance.
 - Everkeep application-specific continuity/recovery contract and evidence.
