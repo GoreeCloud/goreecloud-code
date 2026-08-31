@@ -9,8 +9,9 @@ GoreeCloud Code is original GoreeCloud-owned source-control and developer-platfo
 - Milestone 1 Forgejo connectivity remains in progress pending recorded real-instance validation.
 - The first Milestone 2 write is provider-neutral branch creation.
 - Branch writes require server-side Forgejo permission, a separate application authorization secret, a mandatory application audit sink, and a mandatory idempotency/reconciliation journal.
+- A protected read-only governed-write status route exposes only operation state needed for inspection; it does not reconcile or retry operations.
 - The Forgejo validator can optionally exercise one explicitly selected live branch create, same-key idempotent replay, and provider-neutral branch readback without adding branch-deletion authority.
-- Issue mutation, pull-request mutation, package publication, pipeline writes, and AI-assisted writes are not enabled by this slice.
+- Issue mutation, pull-request mutation, package publication, pipeline writes, reconciliation mutation, and AI-assisted writes are not enabled by this slice.
 
 ## Runtime architecture
 
@@ -34,6 +35,20 @@ Raw idempotency keys are SHA-256 hashed before persistence. Successful matching 
 
 These local files are development foundations. They are not production GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production incident reconstruction.
 
+## Governed-write status contract
+
+`GET /api/v1/governed-writes/:operationId`
+
+The route accepts canonical UUID operation IDs returned by governed writes and requires the same interim GoreeCloud Code application bearer gate. It reads the configured idempotency journal and may report:
+
+- `in_progress`;
+- `succeeded`; or
+- `uncertain`.
+
+The response includes the operation ID, latest observation time, `reconciliationRequired`, and the stored branch result only for a succeeded operation. It deliberately excludes raw idempotency keys, key hashes/fingerprints, authorization credentials, provider credentials, and persisted provider-failure reasons.
+
+The status route is observational only. It cannot retry, reconcile, cancel, delete, or mutate provider state. `in_progress` and `uncertain` remain reconciliation-required states under the current development contract.
+
 ## Live validation contract
 
 `pnpm validate:forgejo` always supports the existing read-path validation. Live branch-write validation is opt-in and requires an explicit `VALIDATE_REPOSITORY`, `VALIDATE_WRITE_BRANCH`, `VALIDATE_WRITE_SOURCE_REF`, and protected `GOREECLOUD_CODE_WRITE_TOKEN`. `VALIDATE_WRITE_IDEMPOTENCY_KEY` may be supplied; otherwise the validator generates a bounded random key.
@@ -52,14 +67,14 @@ A successful validator run is target-specific interoperability evidence only. It
 
 - **Glaze UI:** current consumer target is Glaze UI 2.0.0. Exact-revision consumer conformance is not yet accepted for GoreeCloud Code.
 - **Wardveil Security:** repository/write security policy, authoritative audit/evidence, runner/artifact protections, and production acceptance remain incomplete.
-- **Privacy Shield:** data-use/minimization authority remains separate; current application logs deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
+- **Privacy Shield:** data-use/minimization authority remains separate; current application logs/status output deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
 - **Everkeep:** repository/application continuity, backup, restore, portability, and recovery evidence require an application-specific acceptance contract and remain incomplete.
 - **GoreeCloud Identity:** final actor/session/service authorization is pending; the current secret-file bearer is interim development infrastructure.
 - **GoreeCloud Mesh:** coordination and evidence transport remain pending and must not manufacture security/privacy/continuity truth.
 
 ## Validation
 
-Repository CI performs strict TypeScript checking, deterministic provider/API tests, governed-write audit/idempotency tests, builds, and syntax validation for the Forgejo target-validation tool. Live Forgejo read/write interoperability remains a separate target-environment validation gate and must be recorded before it changes milestone acceptance state.
+Repository CI performs strict TypeScript checking, deterministic provider/API tests, governed-write audit/idempotency/status tests, builds, and syntax validation for the Forgejo target-validation tool. Live Forgejo read/write interoperability remains a separate target-environment validation gate and must be recorded before it changes milestone acceptance state.
 
 ## Stable boundary
 
