@@ -72,3 +72,34 @@ test("detects conflicting and unresolved idempotency keys", async () => {
     state: "uncertain",
   });
 });
+
+test("looks up data-minimized operation state without exposing the idempotency key or provider reason", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "goreecloud-code-idempotency-"));
+  const store = createJsonlIdempotencyStore(join(directory, "branch-writes.jsonl"));
+  const key = "request-status-0001";
+
+  await store.reserve(key, "operation-status-1", repository, branch);
+  const inProgress = await store.lookupOperation("operation-status-1");
+  assert.equal(inProgress?.operationId, "operation-status-1");
+  assert.equal(inProgress?.state, "in_progress");
+  assert.equal(inProgress?.reconciliationRequired, true);
+  assert.equal("branch" in (inProgress ?? {}), false);
+  assert.equal(JSON.stringify(inProgress).includes(key), false);
+
+  await store.markUncertain(key, "operation-status-1", repository, branch, "provider timeout with private upstream detail");
+  const uncertain = await store.lookupOperation("operation-status-1");
+  assert.equal(uncertain?.state, "uncertain");
+  assert.equal(uncertain?.reconciliationRequired, true);
+  assert.equal(JSON.stringify(uncertain).includes("private upstream detail"), false);
+
+  await store.markSucceeded(key, "operation-status-1", repository, branch, {
+    name: branch.name,
+    sha: "abc123",
+    protected: false,
+  });
+  const succeeded = await store.lookupOperation("operation-status-1");
+  assert.equal(succeeded?.state, "succeeded");
+  assert.equal(succeeded?.reconciliationRequired, false);
+  assert.deepEqual(succeeded?.branch, { name: branch.name, sha: "abc123", protected: false });
+  assert.equal(await store.lookupOperation("missing-operation"), null);
+});
