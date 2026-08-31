@@ -31,11 +31,18 @@ export type BranchWriteReserveResult =
   | BranchWriteConflict
   | BranchWriteUnresolved;
 
+export interface BranchWriteOperationDescriptor {
+  action: "repository.branch.create";
+  repository: RepositoryId;
+  branch: CreateBranchInput;
+}
+
 export interface BranchWriteOperationStatus {
   operationId: string;
   state: "in_progress" | "succeeded" | "uncertain";
   observedAt: string;
   reconciliationRequired: boolean;
+  operation?: BranchWriteOperationDescriptor;
   branch?: Branch;
 }
 
@@ -65,7 +72,7 @@ export interface BranchWriteIdempotencyStore {
 
 type JournalState = "in_progress" | "succeeded" | "uncertain";
 
-interface JournalRecord {
+interface JournalRecordV1 {
   version: 1;
   observedAt: string;
   keyHash: string;
@@ -75,6 +82,20 @@ interface JournalRecord {
   result?: Branch;
   reason?: string;
 }
+
+interface JournalRecordV2 {
+  version: 2;
+  observedAt: string;
+  keyHash: string;
+  fingerprint: string;
+  operationId: string;
+  state: JournalState;
+  operation: BranchWriteOperationDescriptor;
+  result?: Branch;
+  reason?: string;
+}
+
+type JournalRecord = JournalRecordV1 | JournalRecordV2;
 
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
 
@@ -157,35 +178,38 @@ export function createJsonlIdempotencyStore(filePath: string): BranchWriteIdempo
           return { kind: "unresolved", operationId: latest.operationId, state: latest.state };
         }
         await append({
-          version: 1,
+          version: 2,
           observedAt: new Date().toISOString(),
           keyHash,
           fingerprint,
           operationId,
           state: "in_progress",
+          operation: operationDescriptor(repository, branch),
         });
         return { kind: "reserved", operationId };
       });
     },
     markSucceeded(key, operationId, repository, branch, result) {
       return serialized(async () => append({
-        version: 1,
+        version: 2,
         observedAt: new Date().toISOString(),
         keyHash: digest(key),
         fingerprint: operationFingerprint(repository, branch),
         operationId,
         state: "succeeded",
+        operation: operationDescriptor(repository, branch),
         result,
       }));
     },
     markUncertain(key, operationId, repository, branch, reason) {
       return serialized(async () => append({
-        version: 1,
+        version: 2,
         observedAt: new Date().toISOString(),
         keyHash: digest(key),
         fingerprint: operationFingerprint(repository, branch),
         operationId,
         state: "uncertain",
+        operation: operationDescriptor(repository, branch),
         ...(reason ? { reason: reason.slice(0, 160) } : {}),
       }));
     },
@@ -201,6 +225,7 @@ export function createJsonlIdempotencyStore(filePath: string): BranchWriteIdempo
           state: latest.state,
           observedAt: latest.observedAt,
           reconciliationRequired: latest.state !== "succeeded",
+          ...(latest.version === 2 ? { operation: latest.operation } : {}),
           ...(latest.state === "succeeded" && latest.result ? { branch: latest.result } : {}),
         };
       });
@@ -212,21 +237,26 @@ function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function operationFingerprint(repository: RepositoryId, branch: CreateBranchInput): string {
-  return digest(JSON.stringify({
+function operationDescriptor(repository: RepositoryId, branch: CreateBranchInput): BranchWriteOperationDescriptor {
+  return {
     action: "repository.branch.create",
     repository: { owner: repository.owner, name: repository.name },
     branch: { name: branch.name, sourceRef: branch.sourceRef },
-  }));
+  };
+}
+
+function operationFingerprint(repository: RepositoryId, branch: CreateBranchInput): string {
+  return digest(JSON.stringify(operationDescriptor(repository, branch)));
 }
 
 function validRecord(value: unknown): value is JournalRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  if (row.version !== 1 || typeof row.observedAt !== "string") return false;
+  if ((row.version !== 1 && row.version !== 2) || typeof row.observedAt !== "string") return false;
   if (!hexDigest(row.keyHash) || !hexDigest(row.fingerprint)) return false;
   if (typeof row.operationId !== "string" || !row.operationId) return false;
   if (!(["in_progress", "succeeded", "uncertain"] as unknown[]).includes(row.state)) return false;
+  if (row.version === 2 && !validOperation(row.operation)) return false;
   if (row.reason !== undefined && typeof row.reason !== "string") return false;
   if (row.state === "succeeded") {
     if (!row.result || typeof row.result !== "object" || Array.isArray(row.result)) return false;
@@ -234,6 +264,20 @@ function validRecord(value: unknown): value is JournalRecord {
     if (typeof result.name !== "string" || typeof result.sha !== "string" || typeof result.protected !== "boolean") return false;
   }
   return true;
+}
+
+function validOperation(value: unknown): value is BranchWriteOperationDescriptor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const operation = value as Record<string, unknown>;
+  if (operation.action !== "repository.branch.create") return false;
+  if (!operation.repository || typeof operation.repository !== "object" || Array.isArray(operation.repository)) return false;
+  if (!operation.branch || typeof operation.branch !== "object" || Array.isArray(operation.branch)) return false;
+  const repository = operation.repository as Record<string, unknown>;
+  const branch = operation.branch as Record<string, unknown>;
+  return typeof repository.owner === "string" && repository.owner.length > 0
+    && typeof repository.name === "string" && repository.name.length > 0
+    && typeof branch.name === "string" && branch.name.length > 0
+    && typeof branch.sourceRef === "string" && branch.sourceRef.length > 0;
 }
 
 function hexDigest(value: unknown): value is string {
