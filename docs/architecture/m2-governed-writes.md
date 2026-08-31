@@ -18,7 +18,7 @@ client request
   -> audit outcome record
 ```
 
-A separate protected read-only status route may inspect the durable local operation state after an operation ID has been returned.
+Separate protected read-only routes may inspect durable local operation state and, for unresolved version-2 branch writes, perform a bounded provider-neutral reconciliation observation.
 
 Only branch creation is enabled. Issue mutation, pull-request creation/review, repository mutation, package publishing, pipeline writes, reconciliation mutation, and AI-assisted writes remain disabled until their own authorization and evidence boundaries are implemented.
 
@@ -26,9 +26,9 @@ Only branch creation is enabled. Issue mutation, pull-request creation/review, r
 
 A branch write requires both a Forgejo provider token with the minimum provider permission necessary to create the branch and the GoreeCloud Code application write gate configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE`.
 
-The application bearer secret and Forgejo provider token are separate credentials. Neither is returned to the browser. The current application token file is an interim development mechanism, not the final GoreeCloud Identity session/authorization design.
+The application bearer secret and Forgejo provider token are separate credentials. Neither is returned to the browser. The current application token file is an interim development mechanism, not the final GoreeCloud Identity session/claims plus Code-owned authorization design.
 
-The governed-write operation-status route also requires the interim application bearer. It does not require or expose the Forgejo provider token because the status is read from GoreeCloud Code's application-owned journal rather than by issuing a provider mutation.
+The governed-write status and reconciliation-assessment routes also require the interim application bearer. Reconciliation assessment may use provider read authority, but it never invokes provider mutation authority.
 
 ## Audit requirement
 
@@ -38,13 +38,23 @@ The local audit record is data-minimized: generated event/operation IDs, event t
 
 This application-owned file is not Wardveil Audit production acceptance.
 
-## Idempotency and reconciliation
+## Idempotency journal versions
 
 Branch mutation also requires `GOREECLOUD_CODE_IDEMPOTENCY_FILE` and a client `Idempotency-Key` header. Accepted keys are bounded to 8–128 characters from the restricted `[A-Za-z0-9._:-]` set.
 
 The raw client key is never persisted. GoreeCloud Code stores its SHA-256 digest plus a SHA-256 fingerprint of the normalized repository/branch operation, operation ID, state, and successful branch result where applicable. The journal is append-only JSONL, bounded in size, created through an application-owned path, and opened with `0600` permissions.
 
-Current states are:
+New records use **version 2** and additionally persist a bounded operation descriptor:
+
+```text
+repository.branch.create
+repository owner + name
+branch name + sourceRef
+```
+
+This descriptor contains the minimum provider-neutral context required to perform a later branch-list observation. Existing **version 1** records remain valid/readable. GoreeCloud Code does not reconstruct missing operation context from hashes or assumptions; a legacy unresolved row therefore remains manual-review-only.
+
+Current local states are:
 
 - `in_progress` — a durable pre-execution reservation exists;
 - `succeeded` — the exact operation completed and its provider result is durable; and
@@ -60,24 +70,37 @@ The journal uses process-local serialization to prevent same-process reservation
 
 `GET /api/v1/governed-writes/:operationId` accepts canonical UUID operation IDs and reads the latest matching journal record under the same local serialization boundary used by journal mutations.
 
-The response is intentionally data-minimized. It may include:
-
-- operation ID;
-- current state;
-- latest observation time;
-- whether reconciliation is required; and
-- the stored branch result only when the operation is durably `succeeded`.
+The response is intentionally data-minimized. It may include operation ID, current state, latest observation time, whether reconciliation is required, version-2 operation context when available, and the stored branch result only when the operation is durably `succeeded`.
 
 The response does not expose raw idempotency keys, key digests, operation fingerprints, authorization credentials, provider credentials, or the persisted provider-failure reason.
 
-The route is observational only. It cannot move an operation between states, call the provider, retry a request, delete a branch, or resolve uncertainty. `in_progress` and `uncertain` remain blocked/reconciliation-required until a separately authorized authoritative reconciliation capability exists.
+## Read-only reconciliation assessment
+
+`GET /api/v1/governed-writes/:operationId/reconciliation` performs no journal or provider mutation.
+
+For a durably succeeded operation it reports `not_required` without a provider call. For an unresolved version-1 row it reports `legacy_operation_context_unavailable` without guessing or querying an arbitrary repository.
+
+For unresolved version-2 branch writes, the assessor calls only `ForgeProvider.branches()` for the recorded repository and compares the recorded target branch name. It may report:
+
+- `provider_branch_present`;
+- `provider_branch_absent`; or
+- `provider_observation_unavailable`.
+
+These are observations, not terminal decisions. Every assessment keeps:
+
+- `mutationAllowed: false`;
+- `automaticResolutionAllowed: false`.
+
+A visible branch may indicate that the provider-side effect occurred, but it does not prove all intended semantics or justify rewriting local durable evidence automatically. An absent branch does not prove the earlier provider request had no effect or authorize a blind retry. Provider observation failures are sanitized and remain manual-review-required.
+
+An authoritative reconciliation mutation is deliberately outside this slice. It requires separate application authorization, Wardveil policy/Audit evidence, durable reconciliation evidence, race/concurrency controls, distributed state semantics, rollback/repair rules, and target-environment acceptance.
 
 ## Input controls
 
-The branch route accepts only JSON, applies an 8 KiB request-body limit, validates both new branch and source refs against Git-incompatible/ref-dangerous forms, and exposes the `idempotency-key` header in the CORS allowlist. The status route accepts only canonical UUID operation identifiers in its path.
+The branch route accepts only JSON, applies an 8 KiB request-body limit, validates both new branch and source refs against Git-incompatible/ref-dangerous forms, and exposes the `idempotency-key` header in the CORS allowlist. The observation routes accept only canonical UUID operation identifiers in their paths.
 
 ## Validation boundary
 
-Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, malformed refs, and API routing.
+Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, v1/v2 journal compatibility, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, reconciliation branch-present/branch-absent/provider-unavailable/legacy behavior, proof that reconciliation assessment does not retry provider mutation, malformed refs, and API routing.
 
-Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, and deployment evidence exist.
+Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed identity/session integration plus Code-owned authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, current Glaze UI 2.1.0 application migration/acceptance, and deployment/recovery evidence exist.
