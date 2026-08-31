@@ -43,6 +43,28 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
           return send(response, 200, { repositories: await provider.repositories() }, options);
         }
 
+        const operationId = governedWriteOperationRoute(url.pathname);
+        if (operationId) {
+          if (!options.authorizeWrite) {
+            return send(response, 503, { error: "write_authorization_unconfigured" }, options);
+          }
+          if (!(await options.authorizeWrite(request.headers.authorization))) {
+            return send(response, 403, { error: "write_authorization_failed" }, options);
+          }
+          if (!options.idempotency) {
+            return send(response, 503, { error: "write_idempotency_unconfigured" }, options);
+          }
+          let operation;
+          try {
+            operation = await options.idempotency.lookupOperation(operationId);
+          } catch {
+            return send(response, 503, { error: "write_idempotency_unavailable" }, options);
+          }
+          return operation
+            ? send(response, 200, { operation }, options)
+            : send(response, 404, { error: "governed_write_operation_not_found" }, options);
+        }
+
         const match = repositoryRoute(url.pathname);
         if (match) {
           const { id, resource } = match;
@@ -203,6 +225,11 @@ async function recordAuditOutcome(
   } catch {
     return false;
   }
+}
+
+function governedWriteOperationRoute(pathname: string): string | null {
+  const match = pathname.match(/^\/api\/v1\/governed-writes\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+  return match?.[1]?.toLowerCase() ?? null;
 }
 
 function repositoryRoute(pathname: string): { id: RepositoryId; resource?: string } | null {
