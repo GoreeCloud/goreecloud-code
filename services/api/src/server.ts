@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import type { CreateBranchInput, ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
 import { branchWriteAuditEvent, type WriteAuditSink } from "./audit.ts";
 import type { BranchWriteIdempotencyStore } from "./idempotency.ts";
+import { assessBranchWriteReconciliation } from "./reconciliation.ts";
 
 export interface CodeServerOptions {
   corsOrigin?: string;
@@ -43,8 +44,8 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
           return send(response, 200, { repositories: await provider.repositories() }, options);
         }
 
-        const operationId = governedWriteOperationRoute(url.pathname);
-        if (operationId) {
+        const governedWrite = governedWriteRoute(url.pathname);
+        if (governedWrite) {
           if (!options.authorizeWrite) {
             return send(response, 503, { error: "write_authorization_unconfigured" }, options);
           }
@@ -56,13 +57,16 @@ export function createCodeServer(provider: ForgeProvider, options: CodeServerOpt
           }
           let operation;
           try {
-            operation = await options.idempotency.lookupOperation(operationId);
+            operation = await options.idempotency.lookupOperation(governedWrite.operationId);
           } catch {
             return send(response, 503, { error: "write_idempotency_unavailable" }, options);
           }
-          return operation
-            ? send(response, 200, { operation }, options)
-            : send(response, 404, { error: "governed_write_operation_not_found" }, options);
+          if (!operation) return send(response, 404, { error: "governed_write_operation_not_found" }, options);
+          if (governedWrite.resource === "reconciliation") {
+            const reconciliation = await assessBranchWriteReconciliation(provider, operation);
+            return send(response, 200, { operation, reconciliation }, options);
+          }
+          return send(response, 200, { operation }, options);
         }
 
         const match = repositoryRoute(url.pathname);
@@ -227,9 +231,14 @@ async function recordAuditOutcome(
   }
 }
 
-function governedWriteOperationRoute(pathname: string): string | null {
-  const match = pathname.match(/^\/api\/v1\/governed-writes\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
-  return match?.[1]?.toLowerCase() ?? null;
+function governedWriteRoute(pathname: string): { operationId: string; resource?: "reconciliation" } | null {
+  const match = pathname.match(/^\/api\/v1\/governed-writes\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(reconciliation))?$/i);
+  const operationId = match?.[1]?.toLowerCase();
+  if (!operationId) return null;
+  return {
+    operationId,
+    ...(match?.[2] === "reconciliation" ? { resource: "reconciliation" as const } : {}),
+  };
 }
 
 function repositoryRoute(pathname: string): { id: RepositoryId; resource?: string } | null {
