@@ -9,9 +9,10 @@ GoreeCloud Code is original GoreeCloud-owned source-control and developer-platfo
 - Milestone 1 Forgejo connectivity remains in progress pending recorded real-instance validation.
 - The first Milestone 2 write is provider-neutral branch creation.
 - Branch writes require server-side Forgejo permission, a separate application authorization secret, a mandatory application audit sink, and a mandatory idempotency/reconciliation journal.
-- A protected read-only governed-write status route exposes only operation state needed for inspection; it does not reconcile or retry operations.
+- Protected read-only governed-write status and reconciliation-assessment routes expose bounded operation/provider observations without authorizing retry or state mutation.
+- New idempotency journal rows use version 2 with a data-minimized branch-write operation descriptor; legacy version-1 rows remain readable without invented operation context.
 - The Forgejo validator can optionally exercise one explicitly selected live branch create, same-key idempotent replay, and provider-neutral branch readback without adding branch-deletion authority.
-- Issue mutation, pull-request mutation, package publication, pipeline writes, reconciliation mutation, and AI-assisted writes are not enabled by this slice.
+- Issue mutation, pull-request mutation, package publication, pipeline writes, authoritative reconciliation mutation, and AI-assisted writes are not enabled by this slice.
 
 ## Runtime architecture
 
@@ -33,6 +34,8 @@ Required development controls:
 
 Raw idempotency keys are SHA-256 hashed before persistence. Successful matching requests replay the stored result without a second provider mutation. Conflicting or unresolved requests fail closed. Provider uncertainty requires reconciliation rather than blind retry.
 
+Version-2 journal rows persist only the branch-create action, normalized repository owner/name, branch name, and source ref as reconciliation-safe operation context. Version-1 rows remain supported for reads and blocking behavior, but absence of context is preserved rather than reconstructed from guesses.
+
 These local files are development foundations. They are not production GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production incident reconstruction.
 
 ## Governed-write status contract
@@ -45,9 +48,23 @@ The route accepts canonical UUID operation IDs returned by governed writes and r
 - `succeeded`; or
 - `uncertain`.
 
-The response includes the operation ID, latest observation time, `reconciliationRequired`, and the stored branch result only for a succeeded operation. It deliberately excludes raw idempotency keys, key hashes/fingerprints, authorization credentials, provider credentials, and persisted provider-failure reasons.
+The response includes the operation ID, latest observation time, `reconciliationRequired`, version-2 operation context when available, and the stored branch result only for a succeeded operation. It deliberately excludes raw idempotency keys, key hashes/fingerprints, authorization credentials, provider credentials, and persisted provider-failure reasons.
 
-The status route is observational only. It cannot retry, reconcile, cancel, delete, or mutate provider state. `in_progress` and `uncertain` remain reconciliation-required states under the current development contract.
+## Read-only reconciliation-assessment contract
+
+`GET /api/v1/governed-writes/:operationId/reconciliation`
+
+The route uses the same authorization and local operation lookup. For unresolved version-2 branch writes it may call only the provider-neutral branch-list read for the recorded repository and compare the recorded target branch name. Possible assessment values are:
+
+- `not_required`;
+- `legacy_operation_context_unavailable`;
+- `provider_branch_present`;
+- `provider_branch_absent`; and
+- `provider_observation_unavailable`.
+
+Every assessment is non-authorizing. `mutationAllowed` and `automaticResolutionAllowed` are always `false`. Branch presence does not change the journal state to succeeded; branch absence does not authorize another create request. Provider observation failure is sanitized rather than returning private upstream error detail. A version-1 operation without safe context remains manual-review-required without a provider call.
+
+An authoritative reconciliation mutation would require its own authorization, durable evidence, concurrency/distributed-state, policy, and rollback design and is not implemented here.
 
 ## Live validation contract
 
@@ -65,17 +82,17 @@ A successful validator run is target-specific interoperability evidence only. It
 
 ## Platform-system requirements
 
-- **Glaze UI:** current consumer target is Glaze UI 2.0.0. Exact-revision consumer conformance is not yet accepted for GoreeCloud Code.
+- **Glaze UI:** current mandatory consumer target is Stable Glaze UI 2.1.0. GoreeCloud Code is migration-required from the historical 2.0.0 target until exact-revision 2.1.0 consumer conformance is completed.
 - **Wardveil Security:** repository/write security policy, authoritative audit/evidence, runner/artifact protections, and production acceptance remain incomplete.
-- **Privacy Shield:** data-use/minimization authority remains separate; current application logs/status output deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
+- **Privacy Shield:** data-use/minimization authority remains separate; current application logs/status/reconciliation output deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
 - **Everkeep:** repository/application continuity, backup, restore, portability, and recovery evidence require an application-specific acceptance contract and remain incomplete.
-- **GoreeCloud Identity:** final actor/session/service authorization is pending; the current secret-file bearer is interim development infrastructure.
+- **GoreeCloud Identity:** Identity supplies authenticated identity/claims while GoreeCloud Code remains responsible for application authorization. Final actor/session/service integration is pending; the current secret-file bearer is interim development infrastructure.
 - **GoreeCloud Mesh:** coordination and evidence transport remain pending and must not manufacture security/privacy/continuity truth.
 
 ## Validation
 
-Repository CI performs strict TypeScript checking, deterministic provider/API tests, governed-write audit/idempotency/status tests, builds, and syntax validation for the Forgejo target-validation tool. Live Forgejo read/write interoperability remains a separate target-environment validation gate and must be recorded before it changes milestone acceptance state.
+Repository CI performs strict TypeScript checking, deterministic provider/API tests, governed-write audit/idempotency/status/reconciliation tests, builds, and syntax validation for the Forgejo target-validation tool. Live Forgejo read/write interoperability remains a separate target-environment validation gate and must be recorded before it changes milestone acceptance state.
 
 ## Stable boundary
 
-GoreeCloud Code is not Stable or production-accepted. Stable qualification requires current Glaze UI consumer acceptance plus applicable Wardveil, Privacy Shield, Everkeep, Identity, Mesh, live Forgejo, least-privilege, deployment, and recovery evidence.
+GoreeCloud Code is not Stable or production-accepted. Stable qualification requires migration to current Stable Glaze UI 2.1.0 and product-specific consumer acceptance plus applicable Wardveil, Privacy Shield, Everkeep, Identity, Mesh, live Forgejo, least-privilege, deployment, reconciliation, and recovery evidence.
