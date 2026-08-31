@@ -9,6 +9,7 @@
 - Separate application authorization and Forgejo provider authorization boundaries.
 - Data-minimized local JSONL audit attempt/outcome records with restrictive permissions.
 - Durable local idempotency reservation, completed-result replay, conflict detection, uncertain-state blocking, and reconciliation-required behavior.
+- Bearer-protected read-only governed-write operation status for `in_progress`, `succeeded`, and `uncertain` journal state without raw idempotency keys or stored provider-failure reasons.
 - Development/test Forgejo validation stack and deterministic CI tests.
 - Opt-in live M2 validation for an explicitly selected branch-create operation, same-key replay verification, and provider-neutral branch readback without branch-deletion authority.
 - Root user manual plus a synchronized central GoreeCloud User Manuals copy.
@@ -17,6 +18,7 @@
 ## Under active development
 
 - Real-instance Forgejo acceptance evidence for Milestone 1 reads and Milestone 2 branch writes.
+- Authoritative reconciliation workflows for unresolved governed writes; current status inspection is observational only.
 - Glaze UI 2.0.0 consumer migration and exact-revision conformance evidence.
 - GoreeCloud Identity-backed user/service authorization.
 - Wardveil policy, audit/evidence, repository, runner, dependency, artifact, and deployment security integration.
