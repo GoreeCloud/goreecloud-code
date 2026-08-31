@@ -19,7 +19,7 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 includes the runnable GoreeCloud-owned API service, repository dashboard, provider-neutral repository activity reads, deterministic provider/API tests, and an end-to-end Forgejo validation stack.
 
-A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, and durable development idempotency/reconciliation state. The validation tool can now opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
+A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, durable development idempotency/reconciliation state, and a protected read-only operation-status surface. The validation tool can opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
 
 ## Architecture
 
@@ -56,7 +56,7 @@ The browser must not receive Forgejo credentials or depend directly on Forgejo-s
 
 Configure the API using `.env.example`. At minimum, reads require `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
 
-Provider-neutral routes include:
+Provider-neutral/product routes include:
 
 - `GET /health`
 - `GET /api/v1/provider`
@@ -64,6 +64,7 @@ Provider-neutral routes include:
 - `GET /api/v1/repositories/:owner/:name`
 - repository branches, commits, issues, and pull-request read endpoints
 - `POST /api/v1/repositories/:owner/:name/branches`
+- `GET /api/v1/governed-writes/:operationId`
 
 ### Governed branch creation
 
@@ -79,6 +80,14 @@ Branch creation requires:
 The audit sink records data-minimized attempted/outcome evidence. The idempotency journal hashes the raw client key before persistence and binds it to the normalized repository/branch operation. A completed matching request replays the stored result without a second provider call. A conflicting key or an in-progress/uncertain operation is blocked; provider uncertainty requires reconciliation rather than blind retry.
 
 Both local JSONL stores use restrictive application-owned paths and mode-`0600` files. They are development foundations, not final GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production recovery/reconciliation.
+
+### Governed-write operation status
+
+`GET /api/v1/governed-writes/:operationId` provides read-only, data-minimized status for the UUID operation IDs returned by governed writes. It requires the same interim GoreeCloud Code application bearer gate as branch creation and the configured idempotency journal.
+
+The response can report `in_progress`, `succeeded`, or `uncertain`, the latest observation time, whether reconciliation is required, and the stored branch result for a succeeded operation. It does not return the raw idempotency key, the persisted key hash/fingerprint, provider credentials, authorization headers, or the stored provider-failure reason.
+
+This endpoint does not reconcile, retry, cancel, delete, or otherwise mutate an operation. An `uncertain` or `in_progress` response remains an observation that requires a separately authorized reconciliation design; it is not permission to retry.
 
 See `docs/architecture/m2-governed-writes.md`.
 
@@ -151,7 +160,7 @@ In progress: real-instance authentication/validation, repository discovery/detai
 
 ### M2 — Governed write operations
 
-In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, and opt-in live write/replay validation tooling. Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
+In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, and opt-in live write/replay validation tooling. Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
 
 ### M3 — Pipelines, packages, and migration
 
