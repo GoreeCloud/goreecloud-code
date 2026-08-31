@@ -19,13 +19,13 @@ Forgejo is the preferred initial, replaceable infrastructure foundation. It is n
 
 Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 includes the runnable GoreeCloud-owned API service, repository dashboard, provider-neutral repository activity reads, deterministic provider/API tests, and an end-to-end Forgejo validation stack.
 
-A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, durable development idempotency/reconciliation state, and a protected read-only operation-status surface. The validation tool can opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
+A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, durable development idempotency state, protected operation-status inspection, and a protected read-only reconciliation assessment. None of these observations authorize an automatic retry or reconciliation mutation. The validation tool can opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
 
 ## Architecture
 
 ```text
 GoreeCloud Code
-├── apps/web                 developer experience; Glaze UI 2.0 migration required
+├── apps/web                 developer experience; Glaze UI 2.1.0 migration required
 ├── packages/contracts       provider-neutral domain contracts
 ├── integrations/forgejo     replaceable Forgejo provider
 ├── services/api             GoreeCloud-owned product API and governed-write controls
@@ -65,6 +65,7 @@ Provider-neutral/product routes include:
 - repository branches, commits, issues, and pull-request read endpoints
 - `POST /api/v1/repositories/:owner/:name/branches`
 - `GET /api/v1/governed-writes/:operationId`
+- `GET /api/v1/governed-writes/:operationId/reconciliation`
 
 ### Governed branch creation
 
@@ -79,15 +80,27 @@ Branch creation requires:
 
 The audit sink records data-minimized attempted/outcome evidence. The idempotency journal hashes the raw client key before persistence and binds it to the normalized repository/branch operation. A completed matching request replays the stored result without a second provider call. A conflicting key or an in-progress/uncertain operation is blocked; provider uncertainty requires reconciliation rather than blind retry.
 
+New journal records use version 2 and persist a bounded operation descriptor containing only the branch-create action, normalized repository owner/name, branch name, and source ref. This allows later read-only reconciliation assessment without persisting the raw idempotency key. Existing version-1 rows remain readable; GoreeCloud Code does not invent missing operation context for historical rows.
+
 Both local JSONL stores use restrictive application-owned paths and mode-`0600` files. They are development foundations, not final GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production recovery/reconciliation.
 
 ### Governed-write operation status
 
 `GET /api/v1/governed-writes/:operationId` provides read-only, data-minimized status for the UUID operation IDs returned by governed writes. It requires the same interim GoreeCloud Code application bearer gate as branch creation and the configured idempotency journal.
 
-The response can report `in_progress`, `succeeded`, or `uncertain`, the latest observation time, whether reconciliation is required, and the stored branch result for a succeeded operation. It does not return the raw idempotency key, the persisted key hash/fingerprint, provider credentials, authorization headers, or the stored provider-failure reason.
+The response can report `in_progress`, `succeeded`, or `uncertain`, the latest observation time, whether reconciliation is required, the data-minimized operation descriptor for version-2 journal records, and the stored branch result for a succeeded operation. It does not return the raw idempotency key, persisted key hash/fingerprint, provider credentials, authorization headers, or stored provider-failure reason.
 
-This endpoint does not reconcile, retry, cancel, delete, or otherwise mutate an operation. An `uncertain` or `in_progress` response remains an observation that requires a separately authorized reconciliation design; it is not permission to retry.
+### Read-only reconciliation assessment
+
+`GET /api/v1/governed-writes/:operationId/reconciliation` uses the same protected operation record and may perform a provider-neutral branch-list read for unresolved version-2 operations. It can report:
+
+- `not_required` for a durably succeeded local operation;
+- `legacy_operation_context_unavailable` when an older version-1 row lacks safe operation context;
+- `provider_branch_present` when the target branch is observed;
+- `provider_branch_absent` when it is not observed; or
+- `provider_observation_unavailable` when the provider read cannot be completed.
+
+The assessment always keeps `mutationAllowed: false` and `automaticResolutionAllowed: false`. Branch presence does not rewrite the local operation to succeeded, and branch absence does not authorize retry. Unresolved operations remain manual-review/reconciliation-required until a separately designed authoritative reconciliation mutation exists.
 
 See `docs/architecture/m2-governed-writes.md`.
 
@@ -128,11 +141,11 @@ See `docs/architecture/m1-forgejo-connectivity.md` and `USER-MANUAL.md`. M1 must
 
 ## Platform integrations and acceptance
 
-- **Glaze UI** — current mandatory consumer target is Glaze UI 2.0.0. Exact-revision GoreeCloud Code conformance is not yet accepted.
+- **Glaze UI** — current mandatory consumer target is Stable Glaze UI 2.1.0. GoreeCloud Code is migration-required until it targets 2.1.0 and completes product-specific conformance evidence; prior 2.0.0 work is historical migration input, not current conformance.
 - **Wardveil Security** — authoritative repository/write policy, Audit/evidence, runner, dependency, artifact, and deployment security remain incomplete. The local Code audit file is not Wardveil Audit.
 - **Privacy Shield** — remains authoritative for data use, consent, minimization, retention, and telemetry governance. Current local evidence deliberately excludes reusable credentials and unnecessary payloads, but runtime Privacy Shield acceptance is not established.
 - **Everkeep** — application-specific backup, restore, preservation, portability, succession, and recovery assurance remain pending.
-- **GoreeCloud Identity** — final actor/session/service authorization remains pending; the secret-file bearer is interim development infrastructure.
+- **GoreeCloud Identity** — authenticated identity/claims remain distinct from application authorization. Final Identity-backed actor/session/service integration and Code-owned authorization remain pending; the secret-file bearer is interim development infrastructure.
 - **GoreeCloud Mesh** — cross-system capability/evidence coordination remains pending and cannot manufacture authority.
 - **GoreeCloud AI** — governed AI-assisted software development remains planned and must use bounded Code operations rather than unrestricted provider credentials.
 
@@ -160,7 +173,7 @@ In progress: real-instance authentication/validation, repository discovery/detai
 
 ### M2 — Governed write operations
 
-In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, and opt-in live write/replay validation tooling. Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
+In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, read-only reconciliation assessment, and opt-in live write/replay validation tooling. Authoritative reconciliation mutation, Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, current Glaze UI 2.1.0 migration, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
 
 ### M3 — Pipelines, packages, and migration
 
