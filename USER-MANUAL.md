@@ -138,7 +138,7 @@ The validator never intentionally prints the application write bearer, Forgejo t
 
 ## Glaze UI Migration State
 
-Current Stable Glaze UI is **2.1.0**. GoreeCloud Code previously targeted 2.0.0, which is now a historical Stable baseline. GoreeCloud Code is therefore migration-required until its application UI targets 2.1.0 and completes product-specific exact-revision conformance/acceptance. A design-system Stable promotion does not automatically make this application conforming.
+The current authoritative Stable consumer target is **GLAZE UI V1.1 / 1.1.0**. Existing 2.x-labeled source is historical migration input and does not establish current conformance. GoreeCloud Code remains migration/reconciliation-required until its application UI targets the accepted 1.1.0 revision and completes product-specific exact-revision conformance/acceptance. A design-system Stable promotion does not automatically make this application conforming.
 
 ## Security, Privacy, and Recovery Boundaries
 
@@ -156,7 +156,7 @@ The current Draft branch still requires, among other evidence:
 - Privacy Shield runtime acceptance;
 - Everkeep continuity and recovery acceptance;
 - distributed idempotency and authoritative reconciliation mutation;
-- migration to Stable Glaze UI 2.1.0 and exact consumer conformance evidence;
+- migration/reconciliation to GLAZE UI V1.1 / 1.1.0 and exact consumer conformance evidence;
 - least-privilege and deployment validation;
 - recovery and reconciliation testing.
 
