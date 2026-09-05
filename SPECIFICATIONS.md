@@ -82,7 +82,7 @@ A successful validator run is target-specific interoperability evidence only. It
 
 ## Platform-system requirements
 
-- **Glaze UI:** current mandatory consumer target is Stable Glaze UI 2.1.0. GoreeCloud Code is migration-required from the historical 2.0.0 target until exact-revision 2.1.0 consumer conformance is completed.
+- **Glaze UI:** current mandatory consumer target is Stable **GLAZE UI V1.1 / 1.1.0**. GoreeCloud Code remains migration/reconciliation-required until exact-revision 1.1.0 consumer conformance is completed; existing 2.x-labeled source is historical migration input and is not current conformance evidence.
 - **Wardveil Security:** repository/write security policy, authoritative audit/evidence, runner/artifact protections, and production acceptance remain incomplete.
 - **Privacy Shield:** data-use/minimization authority remains separate; current application logs/status/reconciliation output deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
 - **Everkeep:** repository/application continuity, backup, restore, portability, and recovery evidence require an application-specific acceptance contract and remain incomplete.
@@ -95,4 +95,4 @@ Repository CI performs strict TypeScript checking, deterministic provider/API te
 
 ## Stable boundary
 
-GoreeCloud Code is not Stable or production-accepted. Stable qualification requires migration to current Stable Glaze UI 2.1.0 and product-specific consumer acceptance plus applicable Wardveil, Privacy Shield, Everkeep, Identity, Mesh, live Forgejo, least-privilege, deployment, reconciliation, and recovery evidence.
+GoreeCloud Code is not Stable or production-accepted. Stable qualification requires migration/reconciliation to current Stable GLAZE UI V1.1 / 1.1.0 and product-specific consumer acceptance plus applicable Wardveil, Privacy Shield, Everkeep, Identity, Mesh, live Forgejo, least-privilege, deployment, reconciliation, and recovery evidence.
