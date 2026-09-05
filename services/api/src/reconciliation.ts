@@ -6,6 +6,7 @@ export type BranchWriteReconciliationAssessmentKind =
   | "legacy_operation_context_unavailable"
   | "provider_branch_present"
   | "provider_branch_absent"
+  | "provider_branch_ambiguous"
   | "provider_observation_unavailable";
 
 export interface BranchWriteReconciliationAssessment {
@@ -18,6 +19,7 @@ export interface BranchWriteReconciliationAssessment {
   manualReviewRequired: boolean;
   providerChecked: boolean;
   observedBranch?: Branch;
+  observedBranches?: Branch[];
   mutationAllowed: false;
   automaticResolutionAllowed: false;
 }
@@ -44,7 +46,16 @@ export async function assessBranchWriteReconciliation(
 
   try {
     const branches = await provider.branches(operation.operation.repository);
-    const observedBranch = branches.find((candidate) => candidate.name === operation.operation?.branch.name);
+    const observedBranches = branches.filter(
+      (candidate) => candidate.name === operation.operation?.branch.name,
+    );
+    if (observedBranches.length > 1) {
+      return {
+        ...baseAssessment(operation, "provider_branch_ambiguous", true, true, assessedAt),
+        observedBranches,
+      };
+    }
+    const observedBranch = observedBranches[0];
     if (observedBranch) {
       return {
         ...baseAssessment(operation, "provider_branch_present", true, true, assessedAt),
