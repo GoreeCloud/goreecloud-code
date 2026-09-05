@@ -83,8 +83,11 @@ For a durably succeeded operation it reports `not_required` without a provider c
 For unresolved version-2 branch writes, the assessor calls only `ForgeProvider.branches()` for the recorded repository and compares the recorded target branch name. It may report:
 
 - `provider_branch_present`;
-- `provider_branch_absent`; or
+- `provider_branch_absent`;
+- `provider_branch_ambiguous`; or
 - `provider_observation_unavailable`.
+
+`provider_branch_ambiguous` is fail-closed handling for a malformed or inconsistent provider observation that contains more than one branch with the recorded target name. GoreeCloud Code preserves the matching provider-neutral branch observations for manual review instead of selecting one arbitrarily. It does not infer success, rewrite local state, or authorize a retry.
 
 The assessment keeps the durable local journal observation time as `localObservedAt` and records a fresh `assessedAt` timestamp for the read-only assessment. This lets manual review distinguish the age of local durable state from the time of the current provider observation without rewriting journal evidence.
 
@@ -93,7 +96,7 @@ These are observations, not terminal decisions. Every assessment keeps:
 - `mutationAllowed: false`;
 - `automaticResolutionAllowed: false`.
 
-A visible branch may indicate that the provider-side effect occurred, but it does not prove all intended semantics or justify rewriting local durable evidence automatically. An absent branch does not prove the earlier provider request had no effect or authorize a blind retry. Provider observation failures are sanitized and remain manual-review-required.
+A visible branch may indicate that the provider-side effect occurred, but it does not prove all intended semantics or justify rewriting local durable evidence automatically. An absent branch does not prove the earlier provider request had no effect or authorize a blind retry. Duplicate target observations remain ambiguous. Provider observation failures are sanitized and remain manual-review-required.
 
 An authoritative reconciliation mutation is deliberately outside this slice. It requires separate application authorization, Wardveil policy/Audit evidence, durable reconciliation evidence, race/concurrency controls, distributed state semantics, rollback/repair rules, and target-environment acceptance.
 
@@ -103,6 +106,6 @@ The branch route accepts only JSON, applies an 8 KiB request-body limit, validat
 
 ## Validation boundary
 
-Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, v1/v2 journal compatibility, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, reconciliation branch-present/branch-absent/provider-unavailable/legacy behavior, proof that reconciliation assessment does not retry provider mutation, malformed refs, and API routing.
+Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, v1/v2 journal compatibility, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, reconciliation branch-present/branch-absent/duplicate-target/provider-unavailable/legacy behavior, proof that reconciliation assessment does not retry provider mutation, malformed refs, and API routing.
 
 Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed identity/session integration plus Code-owned authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, GLAZE UI V1.1 / 1.1.0 migration-reconciliation and application acceptance, and deployment/recovery evidence exist.
