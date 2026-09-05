@@ -25,7 +25,7 @@ A recorded real-instance validation run is still required before M1 is complete.
 
 ```text
 GoreeCloud Code
-├── apps/web                 developer experience; Glaze UI 2.1.0 migration required
+├── apps/web                 developer experience; GLAZE UI V1.1 / 1.1.0 migration-reconciliation required
 ├── packages/contracts       provider-neutral domain contracts
 ├── integrations/forgejo     replaceable Forgejo provider
 ├── services/api             GoreeCloud-owned product API and governed-write controls
@@ -141,7 +141,7 @@ See `docs/architecture/m1-forgejo-connectivity.md` and `USER-MANUAL.md`. M1 must
 
 ## Platform integrations and acceptance
 
-- **Glaze UI** — current mandatory consumer target is Stable Glaze UI 2.1.0. GoreeCloud Code is migration-required until it targets 2.1.0 and completes product-specific conformance evidence; prior 2.0.0 work is historical migration input, not current conformance.
+- **Glaze UI** — the current authoritative Stable consumer target is **GLAZE UI V1.1 / 1.1.0**. GoreeCloud Code remains migration/reconciliation-required until exact-revision product-specific conformance evidence exists. Existing 2.x-labeled source is historical migration input and is not current conformance evidence.
 - **Wardveil Security** — authoritative repository/write policy, Audit/evidence, runner, dependency, artifact, and deployment security remain incomplete. The local Code audit file is not Wardveil Audit.
 - **Privacy Shield** — remains authoritative for data use, consent, minimization, retention, and telemetry governance. Current local evidence deliberately excludes reusable credentials and unnecessary payloads, but runtime Privacy Shield acceptance is not established.
 - **Everkeep** — application-specific backup, restore, preservation, portability, succession, and recovery assurance remain pending.
@@ -173,7 +173,7 @@ In progress: real-instance authentication/validation, repository discovery/detai
 
 ### M2 — Governed write operations
 
-In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, read-only reconciliation assessment, and opt-in live write/replay validation tooling. Authoritative reconciliation mutation, Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, current Glaze UI 2.1.0 migration, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
+In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, read-only reconciliation assessment, and opt-in live write/replay validation tooling. Authoritative reconciliation mutation, Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, GLAZE UI V1.1 / 1.1.0 migration-reconciliation and acceptance, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
 
 ### M3 — Pipelines, packages, and migration
 
