@@ -73,6 +73,30 @@ test("reports provider branch presence without resolving an uncertain operation"
   assertObservationTimes(assessment, observedAt);
 });
 
+test("fails closed when provider observation contains duplicate target branches", async () => {
+  const observedAt = "2026-08-30T00:00:00.000Z";
+  const duplicateBranches = [
+    { name: operation.branch.name, sha: "first", protected: false },
+    { name: operation.branch.name, sha: "second", protected: true },
+  ];
+  const assessment = await assessBranchWriteReconciliation(provider(duplicateBranches), {
+    operationId: "operation-ambiguous",
+    state: "uncertain",
+    observedAt,
+    reconciliationRequired: true,
+    operation,
+  });
+  assert.equal(assessment.assessment, "provider_branch_ambiguous");
+  assert.equal(assessment.reconciliationRequired, true);
+  assert.equal(assessment.manualReviewRequired, true);
+  assert.equal(assessment.providerChecked, true);
+  assert.equal(assessment.mutationAllowed, false);
+  assert.equal(assessment.automaticResolutionAllowed, false);
+  assert.equal(assessment.observedBranch, undefined);
+  assert.deepEqual(assessment.observedBranches, duplicateBranches);
+  assertObservationTimes(assessment, observedAt);
+});
+
 test("reports provider branch absence without authorizing retry", async () => {
   const observedAt = "2026-08-30T00:00:00.000Z";
   const assessment = await assessBranchWriteReconciliation(provider(), {
