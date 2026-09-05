@@ -86,6 +86,8 @@ For unresolved version-2 branch writes, the assessor calls only `ForgeProvider.b
 - `provider_branch_absent`; or
 - `provider_observation_unavailable`.
 
+The assessment keeps the durable local journal observation time as `localObservedAt` and records a fresh `assessedAt` timestamp for the read-only assessment. This lets manual review distinguish the age of local durable state from the time of the current provider observation without rewriting journal evidence.
+
 These are observations, not terminal decisions. Every assessment keeps:
 
 - `mutationAllowed: false`;
@@ -103,4 +105,4 @@ The branch route accepts only JSON, applies an 8 KiB request-body limit, validat
 
 Deterministic tests cover provider request mapping, provider-token requirements, application authorization, audit fail-closed behavior, audit minimization/permissions, idempotency hashing/permissions, v1/v2 journal compatibility, completed replay without a second provider call, conflicting-key rejection, unresolved/uncertain state, unavailable idempotency storage, protected operation-status lookup/minimization, reconciliation branch-present/branch-absent/provider-unavailable/legacy behavior, proof that reconciliation assessment does not retry provider mutation, malformed refs, and API routing.
 
-Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed identity/session integration plus Code-owned authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, current Glaze UI 2.1.0 application migration/acceptance, and deployment/recovery evidence exist.
+Live Forgejo write validation remains separately required. M1 is not complete until the real-instance read/connectivity validation gate is recorded. M2 remains incomplete until target-environment Identity-backed identity/session integration plus Code-owned authorization, authoritative Wardveil policy/audit/evidence, distributed idempotency/reconciliation, least-privilege acceptance, Privacy Shield acceptance, Everkeep continuity treatment, GLAZE UI V1.1 / 1.1.0 migration-reconciliation and application acceptance, and deployment/recovery evidence exist.
