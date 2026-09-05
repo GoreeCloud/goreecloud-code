@@ -21,7 +21,7 @@
 
 - Real-instance Forgejo acceptance evidence for Milestone 1 reads and Milestone 2 branch writes.
 - Authoritative reconciliation mutation/workflows for unresolved governed writes; current reconciliation is assessment-only.
-- Migration to current Stable Glaze UI 2.1.0 and exact-revision consumer conformance evidence. Prior 2.0.0 alignment is historical and no longer current conformance.
+- Migration/reconciliation to the current authoritative Stable **GLAZE UI V1.1 / 1.1.0** consumer target and exact-revision product evidence. Existing 2.x-labeled source is historical migration input, not current conformance.
 - GoreeCloud Identity-backed identity/session integration plus Code-owned user/service authorization.
 - Wardveil policy, audit/evidence, repository, runner, dependency, artifact, and deployment security integration.
 - Privacy Shield runtime data-use/minimization acceptance.
