@@ -1,22 +1,90 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import type { ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
+import type { Branch, CreateBranchInput, ForgeProvider, RepositoryId } from "@goreecloud/code-contracts";
+import type { BranchWriteAuditEvent } from "./audit.ts";
+import type { BranchWriteIdempotencyStore, BranchWriteOperationDescriptor, BranchWriteReserveResult } from "./idempotency.ts";
 import { createCodeServer } from "./server.ts";
 
 const repository = { id: "1", owner: "goreecloud", name: "code", defaultBranch: "main", private: true, webUrl: "https://forge.test/goreecloud/code" };
+let createdBranch: { id: RepositoryId; input: CreateBranchInput } | null = null;
+let createBranchCalls = 0;
+const auditEvents: BranchWriteAuditEvent[] = [];
 
 const provider: ForgeProvider = {
-  async health() { return { provider: "mock", ok: true, version: "1.0", capabilities: ["repositories:read"] }; },
+  async health() { return { provider: "mock", ok: true, version: "1.0", capabilities: ["repositories:read", "repositories:write"] }; },
   async repositories() { return [repository]; },
   async repository(id: RepositoryId) { return { ...repository, ...id }; },
   async branches() { return [{ name: "main", sha: "abc", protected: true }]; },
+  async createBranch(id, input) {
+    createBranchCalls += 1;
+    createdBranch = { id, input };
+    return { name: input.name, sha: "def", protected: false };
+  },
   async commits() { return [{ sha: "abc", message: "Initial", authoredAt: "2026-08-26T00:00:00Z", webUrl: "https://forge.test/c/abc" }]; },
   async issues() { return [{ number: 1, title: "Issue", state: "open", webUrl: "https://forge.test/i/1" }]; },
   async pullRequests() { return [{ number: 2, title: "Change", state: "open", base: "main", head: "feature", webUrl: "https://forge.test/p/2" }]; },
 };
 
+function memoryIdempotencyStore(): BranchWriteIdempotencyStore {
+  const records = new Map<string, {
+    fingerprint: string;
+    operationId: string;
+    state: "in_progress" | "succeeded" | "uncertain";
+    observedAt: string;
+    operation: BranchWriteOperationDescriptor;
+    result?: Branch;
+  }>();
+  const fingerprint = (id: RepositoryId, input: CreateBranchInput) => JSON.stringify({ id, input });
+  const descriptor = (id: RepositoryId, input: CreateBranchInput): BranchWriteOperationDescriptor => ({
+    action: "repository.branch.create",
+    repository: { ...id },
+    branch: { ...input },
+  });
+  const now = () => new Date().toISOString();
+  return {
+    async reserve(key, operationId, id, input): Promise<BranchWriteReserveResult> {
+      const current = records.get(key);
+      const nextFingerprint = fingerprint(id, input);
+      if (!current) {
+        records.set(key, { fingerprint: nextFingerprint, operationId, state: "in_progress", observedAt: now(), operation: descriptor(id, input) });
+        return { kind: "reserved", operationId };
+      }
+      if (current.fingerprint !== nextFingerprint) return { kind: "conflict", operationId: current.operationId };
+      if (current.state === "succeeded") {
+        if (!current.result) throw new Error("Succeeded test idempotency record is missing its result");
+        return { kind: "replay", operationId: current.operationId, branch: current.result };
+      }
+      return { kind: "unresolved", operationId: current.operationId, state: current.state };
+    },
+    async markSucceeded(key, operationId, id, input, result) {
+      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "succeeded", observedAt: now(), operation: descriptor(id, input), result });
+    },
+    async markUncertain(key, operationId, id, input) {
+      records.set(key, { fingerprint: fingerprint(id, input), operationId, state: "uncertain", observedAt: now(), operation: descriptor(id, input) });
+    },
+    async lookupOperation(operationId) {
+      const record = [...records.values()].find((candidate) => candidate.operationId === operationId);
+      if (!record) return null;
+      return {
+        operationId: record.operationId,
+        state: record.state,
+        observedAt: record.observedAt,
+        reconciliationRequired: record.state !== "succeeded",
+        operation: record.operation,
+        ...(record.state === "succeeded" && record.result ? { branch: record.result } : {}),
+      };
+    },
+  };
+}
+
 let baseUrl = "";
-const server = createCodeServer(provider, { corsOrigin: "https://code.test" });
+const idempotency = memoryIdempotencyStore();
+const server = createCodeServer(provider, {
+  corsOrigin: "https://code.test",
+  authorizeWrite: (authorization) => authorization === "Bearer test-write-token",
+  recordWriteAudit: async (event) => { auditEvents.push(event); },
+  idempotency,
+});
 
 before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -34,6 +102,7 @@ test("exposes provider-neutral health and repository routes", async () => {
   const health = await healthResponse.json() as any;
   assert.equal(health.service, "goreecloud-code-api");
   assert.equal(health.provider.provider, "mock");
+  assert.deepEqual(health.governedWrites, { authorizationConfigured: true, auditConfigured: true, idempotencyConfigured: true });
 
   const repositories = await (await fetch(`${baseUrl}/api/v1/repositories`)).json() as any;
   assert.equal(repositories.repositories[0].name, "code");
@@ -50,7 +119,285 @@ test("routes repository subresources without provider-specific URLs", async () =
   assert.equal(changes.pullRequests[0].number, 2);
 });
 
+test("creates a branch only after authorization, idempotency reservation, and durable-attempt audit", async () => {
+  createdBranch = null;
+  auditEvents.length = 0;
+  createBranchCalls = 0;
+  const response = await branchRequest("request-security-0001", { name: "feature/security", sourceRef: "main" });
+  assert.equal(response.status, 201);
+  assert.deepEqual(createdBranch, { id: { owner: "goreecloud", name: "code" }, input: { name: "feature/security", sourceRef: "main" } });
+  const payload = await response.json() as any;
+  assert.deepEqual(payload.branch, { name: "feature/security", sha: "def", protected: false });
+  assert.equal(typeof payload.operationId, "string");
+  assert.deepEqual(payload.audit, { attemptRecorded: true, outcomeRecorded: true });
+  assert.deepEqual(payload.idempotency, { replayed: false });
+  assert.deepEqual(auditEvents.map((event) => event.phase), ["attempted", "succeeded"]);
+  assert.equal(createBranchCalls, 1);
+});
+
+test("replays a completed idempotent branch write without calling the provider twice", async () => {
+  const response = await branchRequest("request-security-0001", { name: "feature/security", sourceRef: "main" });
+  assert.equal(response.status, 200);
+  const payload = await response.json() as any;
+  assert.deepEqual(payload.idempotency, { replayed: true });
+  assert.equal(createBranchCalls, 1);
+});
+
+test("rejects reuse of an idempotency key for a different operation", async () => {
+  const response = await branchRequest("request-security-0001", { name: "feature/different", sourceRef: "main" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as any).error, "idempotency_key_conflict");
+  assert.equal(createBranchCalls, 1);
+});
+
+test("exposes bearer-protected data-minimized governed-write operation status", async () => {
+  const created = await branchRequest("request-status-0001", { name: "feature/status", sourceRef: "main" });
+  assert.equal(created.status, 201);
+  const createdPayload = await created.json() as any;
+  const operationId = createdPayload.operationId as string;
+
+  const unauthorized = await fetch(`${baseUrl}/api/v1/governed-writes/${operationId}`);
+  assert.equal(unauthorized.status, 403);
+  assert.equal((await unauthorized.json() as any).error, "write_authorization_failed");
+
+  const statusResponse = await fetch(`${baseUrl}/api/v1/governed-writes/${operationId}`, {
+    headers: { authorization: "Bearer test-write-token" },
+  });
+  assert.equal(statusResponse.status, 200);
+  const status = await statusResponse.json() as any;
+  assert.equal(status.operation.operationId, operationId);
+  assert.equal(status.operation.state, "succeeded");
+  assert.equal(status.operation.reconciliationRequired, false);
+  assert.deepEqual(status.operation.operation, {
+    action: "repository.branch.create",
+    repository: { owner: "goreecloud", name: "code" },
+    branch: { name: "feature/status", sourceRef: "main" },
+  });
+  assert.deepEqual(status.operation.branch, { name: "feature/status", sha: "def", protected: false });
+  assert.equal(JSON.stringify(status).includes("request-status-0001"), false);
+
+  const reconciliation = await fetch(`${baseUrl}/api/v1/governed-writes/${operationId}/reconciliation`, {
+    headers: { authorization: "Bearer test-write-token" },
+  });
+  assert.equal(reconciliation.status, 200);
+  const reconciliationPayload = await reconciliation.json() as any;
+  assert.equal(reconciliationPayload.reconciliation.assessment, "not_required");
+  assert.equal(reconciliationPayload.reconciliation.providerChecked, false);
+  assert.equal(reconciliationPayload.reconciliation.mutationAllowed, false);
+  assert.equal(reconciliationPayload.reconciliation.automaticResolutionAllowed, false);
+
+  const missing = await fetch(`${baseUrl}/api/v1/governed-writes/00000000-0000-4000-8000-000000000001`, {
+    headers: { authorization: "Bearer test-write-token" },
+  });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json() as any).error, "governed_write_operation_not_found");
+});
+
+test("observes an uncertain provider outcome without resolving or retrying it", async () => {
+  const uncertainStore = memoryIdempotencyStore();
+  let mutationCalls = 0;
+  const uncertainProvider: ForgeProvider = {
+    ...provider,
+    async branches() {
+      return [
+        { name: "main", sha: "abc", protected: true },
+        { name: "feature/uncertain", sha: "observed", protected: false },
+      ];
+    },
+    async createBranch() {
+      mutationCalls += 1;
+      throw new Error("provider outcome unavailable");
+    },
+  };
+  const uncertainServer = createCodeServer(uncertainProvider, {
+    authorizeWrite: (authorization) => authorization === "Bearer test-write-token",
+    recordWriteAudit: async () => {},
+    idempotency: uncertainStore,
+  });
+
+  await withServer(uncertainServer, async (url) => {
+    const create = await fetch(`${url}/api/v1/repositories/goreecloud/code/branches`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer test-write-token",
+        "content-type": "application/json",
+        "idempotency-key": "request-uncertain-0001",
+      },
+      body: JSON.stringify({ name: "feature/uncertain", sourceRef: "main" }),
+    });
+    assert.equal(create.status, 502);
+    const operationId = (await create.json() as any).operationId as string;
+    assert.equal(mutationCalls, 1);
+
+    const reconciliation = await fetch(`${url}/api/v1/governed-writes/${operationId}/reconciliation`, {
+      headers: { authorization: "Bearer test-write-token" },
+    });
+    assert.equal(reconciliation.status, 200);
+    const payload = await reconciliation.json() as any;
+    assert.equal(payload.operation.state, "uncertain");
+    assert.equal(payload.reconciliation.assessment, "provider_branch_present");
+    assert.equal(payload.reconciliation.reconciliationRequired, true);
+    assert.equal(payload.reconciliation.manualReviewRequired, true);
+    assert.equal(payload.reconciliation.mutationAllowed, false);
+    assert.equal(payload.reconciliation.automaticResolutionAllowed, false);
+    assert.deepEqual(payload.reconciliation.observedBranch, { name: "feature/uncertain", sha: "observed", protected: false });
+    assert.equal(mutationCalls, 1);
+  });
+});
+
+test("requires a bounded Idempotency-Key header", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-write-token", "content-type": "application/json" },
+    body: JSON.stringify({ name: "feature/missing-key", sourceRef: "main" }),
+  });
+  assert.equal(response.status, 400);
+});
+
+test("records denied branch writes without logging credentials", async () => {
+  auditEvents.length = 0;
+  const unauthorized = await fetch(`${baseUrl}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer wrong-secret", "idempotency-key": "request-denied-0001" },
+    body: JSON.stringify({ name: "feature/denied", sourceRef: "main" }),
+  });
+  assert.equal(unauthorized.status, 403);
+  assert.deepEqual(auditEvents.map((event) => event.phase), ["attempted", "denied"]);
+  assert.equal(JSON.stringify(auditEvents).includes("wrong-secret"), false);
+  assert.equal(JSON.stringify(auditEvents).includes("request-denied-0001"), false);
+});
+
+test("rejects malformed branch creation requests", async () => {
+  const invalidRef = await fetch(`${baseUrl}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-write-token", "content-type": "application/json", "idempotency-key": "request-invalid-0001" },
+    body: JSON.stringify({ name: "../unsafe", sourceRef: "main" }),
+  });
+  assert.equal(invalidRef.status, 400);
+
+  const wrongMediaType = await fetch(`${baseUrl}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-write-token", "content-type": "text/plain", "idempotency-key": "request-invalid-0002" },
+    body: "{}",
+  });
+  assert.equal(wrongMediaType.status, 415);
+});
+
+test("fails closed when governed-write controls are not configured", async () => {
+  const auditMissing = createCodeServer(provider, { authorizeWrite: () => true, idempotency: memoryIdempotencyStore() });
+  await withServer(auditMissing, async (url) => {
+    const response = await postBranch(url, "request-locked-0001", "Bearer test-write-token");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_audit_unconfigured");
+  });
+
+  const idempotencyMissing = createCodeServer(provider, { authorizeWrite: () => true, recordWriteAudit: async () => {} });
+  await withServer(idempotencyMissing, async (url) => {
+    const response = await postBranch(url, "request-locked-0002", "Bearer test-write-token");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_idempotency_unconfigured");
+  });
+});
+
+test("fails closed when write authorization is not configured", async () => {
+  const events: BranchWriteAuditEvent[] = [];
+  const lockedServer = createCodeServer(provider, {
+    recordWriteAudit: async (event) => { events.push(event); },
+    idempotency: memoryIdempotencyStore(),
+  });
+  await withServer(lockedServer, async (url) => {
+    const response = await postBranch(url, "request-locked-0003");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_authorization_unconfigured");
+    assert.deepEqual(events.map((event) => event.phase), ["attempted", "denied"]);
+  });
+});
+
+test("fails closed before provider mutation when the audit sink is unavailable", async () => {
+  createdBranch = null;
+  const lockedServer = createCodeServer(provider, {
+    authorizeWrite: () => true,
+    recordWriteAudit: async () => { throw new Error("disk unavailable"); },
+    idempotency: memoryIdempotencyStore(),
+  });
+  await withServer(lockedServer, async (url) => {
+    const response = await postBranch(url, "request-locked-0004", "Bearer test-write-token");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_audit_unavailable");
+    assert.equal(createdBranch, null);
+  });
+});
+
+test("fails closed before provider mutation when idempotency storage is unavailable", async () => {
+  createdBranch = null;
+  const unavailable: BranchWriteIdempotencyStore = {
+    async reserve() { throw new Error("disk unavailable"); },
+    async markSucceeded() {},
+    async markUncertain() {},
+    async lookupOperation() { throw new Error("disk unavailable"); },
+  };
+  const lockedServer = createCodeServer(provider, {
+    authorizeWrite: () => true,
+    recordWriteAudit: async () => {},
+    idempotency: unavailable,
+  });
+  await withServer(lockedServer, async (url) => {
+    const response = await postBranch(url, "request-locked-0005", "Bearer test-write-token");
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_idempotency_unavailable");
+    assert.equal(createdBranch, null);
+  });
+});
+
+test("governed-write status fails closed when authorization or idempotency is unavailable", async () => {
+  const operationId = "00000000-0000-4000-8000-000000000002";
+  const authorizationMissing = createCodeServer(provider, { idempotency: memoryIdempotencyStore() });
+  await withServer(authorizationMissing, async (url) => {
+    const response = await fetch(`${url}/api/v1/governed-writes/${operationId}`);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_authorization_unconfigured");
+  });
+
+  const idempotencyMissing = createCodeServer(provider, { authorizeWrite: () => true });
+  await withServer(idempotencyMissing, async (url) => {
+    const response = await fetch(`${url}/api/v1/governed-writes/${operationId}/reconciliation`);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as any).error, "write_idempotency_unconfigured");
+  });
+});
+
 test("rejects unsupported methods and unknown routes", async () => {
   assert.equal((await fetch(`${baseUrl}/api/v1/repositories`, { method: "POST" })).status, 405);
   assert.equal((await fetch(`${baseUrl}/missing`)).status, 404);
 });
+
+function branchRequest(key: string, input: CreateBranchInput) {
+  return fetch(`${baseUrl}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-write-token", "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify(input),
+  });
+}
+
+function postBranch(url: string, key: string, authorization?: string) {
+  return fetch(`${url}/api/v1/repositories/goreecloud/code/branches`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": key,
+      ...(authorization ? { authorization } : {}),
+    },
+    body: JSON.stringify({ name: "feature", sourceRef: "main" }),
+  });
+}
+
+async function withServer(instance: ReturnType<typeof createCodeServer>, work: (url: string) => Promise<void>) {
+  await new Promise<void>((resolve) => instance.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = instance.address();
+    if (!address || typeof address === "string") throw new Error("API test server failed to bind");
+    await work(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => instance.close((error) => error ? reject(error) : resolve()));
+  }
+}

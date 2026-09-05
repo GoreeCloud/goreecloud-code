@@ -32,6 +32,11 @@ export interface Branch {
   protected: boolean;
 }
 
+export interface CreateBranchInput {
+  name: string;
+  sourceRef: string;
+}
+
 export interface Commit {
   sha: string;
   message: string;
@@ -75,6 +80,7 @@ export interface ForgeProvider {
   repositories(): Promise<Repository[]>;
   repository(id: RepositoryId): Promise<Repository>;
   branches(id: RepositoryId): Promise<Branch[]>;
+  createBranch(id: RepositoryId, input: CreateBranchInput): Promise<Branch>;
   commits(id: RepositoryId, ref?: string): Promise<Commit[]>;
   issues(id: RepositoryId): Promise<Issue[]>;
   pullRequests(id: RepositoryId): Promise<PullRequest[]>;

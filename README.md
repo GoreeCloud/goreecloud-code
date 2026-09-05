@@ -4,28 +4,37 @@ GoreeCloud Code is the first-party GoreeCloud developer and source-control platf
 
 Forgejo is the preferred initial, replaceable infrastructure foundation. It is not the permanent GoreeCloud product boundary. GoreeCloud Code owns the user experience, service contracts, governance model, integration architecture, and long-term developer platform.
 
+## Project records
+
+- [Specifications](SPECIFICATIONS.md)
+- [Features](FEATURES.md)
+- [Benefits](BENEFITS.md)
+- [Competitive objectives](COMPETITIVE-OBJECTIVES.md)
+- [User manual](USER-MANUAL.md)
+- [Branding authority](BRANDING.md)
+
 ## Status
 
-**Milestone 1 — Forgejo Connectivity (in progress)**
+**Milestone 1 — Forgejo Connectivity remains in progress, with the first Milestone 2 governed write boundary under development.**
 
-Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 now includes the runnable GoreeCloud-owned API service, live Glaze UI repository dashboard, provider-neutral repository activity reads, and an end-to-end Forgejo validation stack.
+Milestone 0 established the product boundary, provider abstraction, Forgejo adapter, web application shell, shared contracts, CI foundation, and deployment scaffolding. M1 includes the runnable GoreeCloud-owned API service, repository dashboard, provider-neutral repository activity reads, deterministic provider/API tests, and an end-to-end Forgejo validation stack.
 
-Current M1 capabilities include provider health/version reporting, repository discovery and detail retrieval, branches, commits, issues, and pull-request reads. A real-instance validation run is still required before M1 is complete.
+A recorded real-instance validation run is still required before M1 is complete. The first M2 slice adds provider-neutral branch creation behind explicit server-side authorization, mandatory application audit evidence, durable development idempotency state, protected operation-status inspection, and a protected read-only reconciliation assessment. None of these observations authorize an automatic retry or reconciliation mutation. The validation tool can opt in to one controlled live branch-create/replay check when an operator supplies an explicit target repository, validation branch, source ref, and application bearer. This does not mark M1 or M2 complete.
 
 ## Architecture
 
 ```text
 GoreeCloud Code
-├── apps/web                 Glaze UI developer experience
-├── packages/contracts       Provider-neutral domain contracts
-├── integrations/forgejo     Replaceable Forgejo provider
-├── services/api             GoreeCloud-owned product API
+├── apps/web                 developer experience; GLAZE UI V1.1 / 1.1.0 migration-reconciliation required
+├── packages/contracts       provider-neutral domain contracts
+├── integrations/forgejo     replaceable Forgejo provider
+├── services/api             GoreeCloud-owned product API and governed-write controls
 ├── deploy/forgejo           M1 Forgejo validation deployment
-├── scripts                  End-to-end validation tools
-└── docs                     Architecture, ADRs, security, migration
+├── scripts                  read-path and opt-in governed-write validation tools
+└── docs                     architecture, ADRs, security, migration
 ```
 
-The runtime boundary is intentionally replaceable:
+Runtime boundary:
 
 ```text
 Glaze UI / GoreeCloud clients
@@ -37,27 +46,67 @@ Glaze UI / GoreeCloud clients
        ForgeProvider
             │
             ├── ForgejoProvider      initial implementation
-            ├── GitHubProvider       migration/interoperability
+            ├── GitHubProvider       future migration/interoperability adapter
             └── NativeProvider       future GoreeCloud implementation
 ```
 
 The browser must not receive Forgejo credentials or depend directly on Forgejo-specific APIs.
 
-## Local connectivity
+## API and local connectivity
 
-Configure the GoreeCloud Code API using `.env.example`. At minimum, provide `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
+Configure the API using `.env.example`. At minimum, reads require `FORGEJO_BASE_URL`. Private repository discovery requires a narrowly scoped `FORGEJO_TOKEN`; anonymous public discovery can use `FORGEJO_USERNAME` when supported by the instance.
 
-The provider-neutral API includes:
+Provider-neutral/product routes include:
 
 - `GET /health`
 - `GET /api/v1/provider`
 - `GET /api/v1/repositories`
 - `GET /api/v1/repositories/:owner/:name`
 - repository branches, commits, issues, and pull-request read endpoints
+- `POST /api/v1/repositories/:owner/:name/branches`
+- `GET /api/v1/governed-writes/:operationId`
+- `GET /api/v1/governed-writes/:operationId/reconciliation`
 
-For an isolated M1 test environment, use `deploy/forgejo/compose.yml` with `deploy/forgejo/.env.example`. This brings up Forgejo and PostgreSQL for local validation; it is not the production deployment architecture.
+### Governed branch creation
 
-Once Forgejo and the GoreeCloud Code API are running, validate the provider boundary with:
+Branch creation requires:
+
+1. valid JSON containing `name` and `sourceRef`;
+2. a valid bounded `Idempotency-Key` header;
+3. a Forgejo provider token with the required provider permission;
+4. application-level bearer authorization configured through `GOREECLOUD_CODE_WRITE_TOKEN_FILE`;
+5. `GOREECLOUD_CODE_AUDIT_LOG_FILE`; and
+6. `GOREECLOUD_CODE_IDEMPOTENCY_FILE`.
+
+The audit sink records data-minimized attempted/outcome evidence. The idempotency journal hashes the raw client key before persistence and binds it to the normalized repository/branch operation. A completed matching request replays the stored result without a second provider call. A conflicting key or an in-progress/uncertain operation is blocked; provider uncertainty requires reconciliation rather than blind retry.
+
+New journal records use version 2 and persist a bounded operation descriptor containing only the branch-create action, normalized repository owner/name, branch name, and source ref. This allows later read-only reconciliation assessment without persisting the raw idempotency key. Existing version-1 rows remain readable; GoreeCloud Code does not invent missing operation context for historical rows.
+
+Both local JSONL stores use restrictive application-owned paths and mode-`0600` files. They are development foundations, not final GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production recovery/reconciliation.
+
+### Governed-write operation status
+
+`GET /api/v1/governed-writes/:operationId` provides read-only, data-minimized status for the UUID operation IDs returned by governed writes. It requires the same interim GoreeCloud Code application bearer gate as branch creation and the configured idempotency journal.
+
+The response can report `in_progress`, `succeeded`, or `uncertain`, the latest observation time, whether reconciliation is required, the data-minimized operation descriptor for version-2 journal records, and the stored branch result for a succeeded operation. It does not return the raw idempotency key, persisted key hash/fingerprint, provider credentials, authorization headers, or stored provider-failure reason.
+
+### Read-only reconciliation assessment
+
+`GET /api/v1/governed-writes/:operationId/reconciliation` uses the same protected operation record and may perform a provider-neutral branch-list read for unresolved version-2 operations. It can report:
+
+- `not_required` for a durably succeeded local operation;
+- `legacy_operation_context_unavailable` when an older version-1 row lacks safe operation context;
+- `provider_branch_present` when the target branch is observed;
+- `provider_branch_absent` when it is not observed; or
+- `provider_observation_unavailable` when the provider read cannot be completed.
+
+The assessment always keeps `mutationAllowed: false` and `automaticResolutionAllowed: false`. Branch presence does not rewrite the local operation to succeeded, and branch absence does not authorize retry. Unresolved operations remain manual-review/reconciliation-required until a separately designed authoritative reconciliation mutation exists.
+
+See `docs/architecture/m2-governed-writes.md`.
+
+## Forgejo validation
+
+For an isolated M1 test environment, use `deploy/forgejo/compose.yml` with `deploy/forgejo/.env.example`. This stack is development/test infrastructure, not production architecture.
 
 ```sh
 FORGEJO_BASE_URL=http://localhost:3000 \
@@ -66,43 +115,65 @@ VALIDATE_REPOSITORY=owner/repository \
 pnpm validate:forgejo
 ```
 
-See `docs/architecture/m1-forgejo-connectivity.md` for the full validation gate. M1 must not be marked complete until a real test run is recorded.
+With only the read-path variables, the validator exercises Forgejo version availability and provider-neutral repository reads through GoreeCloud Code.
 
-## Platform integrations
+### Opt-in M2 branch-write validation
 
-GoreeCloud Code is designed to integrate with substantive GoreeCloud platform systems as implementations become available:
+Live write validation remains disabled unless an operator explicitly selects a disposable target branch and supplies the existing application write bearer:
 
-- **Glaze UI** — developer experience and interaction system.
-- **GoreeCloud AI** — governed AI-assisted software development.
-- **Wardveil Security** — evidence-backed repository, runner, dependency, artifact, and deployment security state.
-- **Privacy Shield** — privacy-control contracts, data minimization, retention, and telemetry governance.
-- **Everkeep** — backup, recovery, preservation, portability, and succession.
-- **GoreeCloud Mesh** — coordination and governance between first-party applications and services.
+```sh
+FORGEJO_BASE_URL=http://localhost:3000 \
+GOREECLOUD_CODE_API_URL=http://localhost:8787 \
+VALIDATE_REPOSITORY=owner/repository \
+VALIDATE_WRITE_BRANCH=validation/unique-branch \
+VALIDATE_WRITE_SOURCE_REF=main \
+GOREECLOUD_CODE_WRITE_TOKEN='<protected-runtime-value>' \
+pnpm validate:forgejo
+```
 
-Public claims about these systems must remain tied to implemented capabilities and available evidence.
+`VALIDATE_WRITE_IDEMPOTENCY_KEY` may be supplied explicitly; otherwise the validator creates a bounded random key for that run. The tool requires the first write to return a new operation, repeats the same request with the same key and requires an idempotent replay using the same operation ID, then confirms the created branch through the provider-neutral read route.
+
+The validator intentionally does not implement or exercise branch deletion. The operator must choose a disposable, uniquely named validation branch and handle later cleanup through an already approved administrative path. The validator does not intentionally print the Forgejo token, application write bearer, or raw idempotency key.
+
+The repository-level `pnpm check` command syntax-checks the validator so the opt-in live path cannot silently rot between target-environment runs.
+
+See `docs/architecture/m1-forgejo-connectivity.md` and `USER-MANUAL.md`. M1 must not be marked complete until real-instance validation is recorded, and M2 write interoperability is not accepted until the opt-in write path is successfully executed against an approved target and its evidence is recorded.
+
+## Platform integrations and acceptance
+
+- **Glaze UI** — the current authoritative Stable consumer target is **GLAZE UI V1.1 / 1.1.0**. GoreeCloud Code remains migration/reconciliation-required until exact-revision product-specific conformance evidence exists. Existing 2.x-labeled source is historical migration input and is not current conformance evidence.
+- **Wardveil Security** — authoritative repository/write policy, Audit/evidence, runner, dependency, artifact, and deployment security remain incomplete. The local Code audit file is not Wardveil Audit.
+- **Privacy Shield** — remains authoritative for data use, consent, minimization, retention, and telemetry governance. Current local evidence deliberately excludes reusable credentials and unnecessary payloads, but runtime Privacy Shield acceptance is not established.
+- **Everkeep** — application-specific backup, restore, preservation, portability, succession, and recovery assurance remain pending.
+- **GoreeCloud Identity** — authenticated identity/claims remain distinct from application authorization. Final Identity-backed actor/session/service integration and Code-owned authorization remain pending; the secret-file bearer is interim development infrastructure.
+- **GoreeCloud Mesh** — cross-system capability/evidence coordination remains pending and cannot manufacture authority.
+- **GoreeCloud AI** — governed AI-assisted software development remains planned and must use bounded Code operations rather than unrestricted provider credentials.
+
+Public claims about these systems must remain tied to implemented capabilities and current evidence.
 
 ## Development principles
 
 1. Standard Git remains the repository interoperability foundation.
 2. Forgejo is replaceable infrastructure, not the permanent product boundary.
-3. GoreeCloud-owned APIs and contracts must not expose unnecessary Forgejo-specific assumptions.
+3. GoreeCloud-owned APIs and contracts must minimize provider-specific assumptions.
 4. CI logic should remain portable between GitHub Actions, Forgejo Actions, and future GoreeCloud Pipelines.
-5. Security-sensitive capabilities require least privilege, explicit authorization, and evidence-backed controls.
+5. Security-sensitive capabilities require least privilege, explicit authority, durable replay safety, evidence, and reconciliation.
 6. Repository migration must preserve Git history and deliberately account for metadata outside Git itself.
+7. Stable qualification requires current applicable Glaze UI, Wardveil Security, Privacy Shield, Everkeep, Identity, Mesh, runtime, and recovery evidence.
 
-## Initial roadmap
+## Roadmap
 
 ### M0 — Bootstrap
 
-Complete foundation: monorepo, provider contracts, Forgejo adapter, web shell, API boundary, CI, and architecture decisions.
+Foundation established: monorepo, provider contracts, Forgejo adapter, web shell, API boundary, CI, and architecture decisions.
 
 ### M1 — Forgejo connectivity
 
-In progress: real-instance authentication and validation, repository discovery/detail, branches, commits, issues, pull requests, provider health, live web dashboard, and end-to-end validation tooling.
+In progress: real-instance authentication/validation, repository discovery/detail, branches, commits, issues, pull requests, provider health, live dashboard, and end-to-end validation tooling.
 
 ### M2 — Governed write operations
 
-Planned: branch creation, issue mutation, pull-request creation, review workflows, and bounded GoreeCloud AI operations.
+In progress: branch creation with ref validation, separate application/provider authorization, mandatory audit, durable development idempotency, safe replay, reconciliation-required uncertainty, protected operation-status inspection, read-only reconciliation assessment, and opt-in live write/replay validation tooling. Authoritative reconciliation mutation, Identity-backed authorization, Wardveil policy/Audit, Privacy Shield acceptance, Everkeep continuity, distributed idempotency/reconciliation, least privilege, GLAZE UI V1.1 / 1.1.0 migration-reconciliation and acceptance, and live target validation evidence remain incomplete. Issue/pull-request/review and AI-assisted mutations remain disabled.
 
 ### M3 — Pipelines, packages, and migration
 
