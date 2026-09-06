@@ -9,6 +9,18 @@ export type BranchWriteReconciliationAssessmentKind =
   | "provider_branch_ambiguous"
   | "provider_observation_unavailable";
 
+export type BranchWriteSourceRevisionObservation =
+  | {
+      kind: "exact_source_revision_matches";
+      expectedSha: string;
+      observedSha: string;
+    }
+  | {
+      kind: "exact_source_revision_differs";
+      expectedSha: string;
+      observedSha: string;
+    };
+
 export interface BranchWriteReconciliationAssessment {
   operationId: string;
   localState: BranchWriteOperationStatus["state"];
@@ -20,6 +32,7 @@ export interface BranchWriteReconciliationAssessment {
   providerChecked: boolean;
   observedBranch?: Branch;
   observedBranches?: Branch[];
+  sourceRevisionObservation?: BranchWriteSourceRevisionObservation;
   mutationAllowed: false;
   automaticResolutionAllowed: false;
 }
@@ -57,15 +70,43 @@ export async function assessBranchWriteReconciliation(
     }
     const observedBranch = observedBranches[0];
     if (observedBranch) {
+      const sourceRevisionObservation = compareExactSourceRevision(
+        operation.operation.branch.sourceRef,
+        observedBranch.sha,
+      );
       return {
         ...baseAssessment(operation, "provider_branch_present", true, true, assessedAt),
         observedBranch,
+        ...(sourceRevisionObservation ? { sourceRevisionObservation } : {}),
       };
     }
     return baseAssessment(operation, "provider_branch_absent", true, true, assessedAt);
   } catch {
     return baseAssessment(operation, "provider_observation_unavailable", true, true, assessedAt);
   }
+}
+
+function compareExactSourceRevision(
+  sourceRef: string,
+  observedSha: string,
+): BranchWriteSourceRevisionObservation | undefined {
+  const expectedSha = exactGitObjectId(sourceRef);
+  if (!expectedSha) return undefined;
+  const normalizedObservedSha = observedSha.trim().toLowerCase();
+  return {
+    kind:
+      normalizedObservedSha === expectedSha
+        ? "exact_source_revision_matches"
+        : "exact_source_revision_differs",
+    expectedSha,
+    observedSha: normalizedObservedSha,
+  };
+}
+
+function exactGitObjectId(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(normalized)) return normalized;
+  return undefined;
 }
 
 function baseAssessment(
