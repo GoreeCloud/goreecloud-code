@@ -69,8 +69,55 @@ test("reports provider branch presence without resolving an uncertain operation"
   assert.equal(assessment.reconciliationRequired, true);
   assert.equal(assessment.manualReviewRequired, true);
   assert.deepEqual(assessment.observedBranch, { name: operation.branch.name, sha: "def", protected: false });
+  assert.equal(assessment.sourceRevisionObservation, undefined);
   assert.equal(assessment.automaticResolutionAllowed, false);
   assertObservationTimes(assessment, observedAt);
+});
+
+test("compares provider branch revision when the recorded source ref is an exact object id", async () => {
+  const expectedSha = "a".repeat(40);
+  const observedAt = "2026-08-30T00:00:00.000Z";
+  const exactOperation = {
+    ...operation,
+    branch: { ...operation.branch, sourceRef: expectedSha.toUpperCase() },
+  };
+
+  const matching = await assessBranchWriteReconciliation(provider([
+    { name: exactOperation.branch.name, sha: expectedSha, protected: false },
+  ]), {
+    operationId: "operation-exact-match",
+    state: "uncertain",
+    observedAt,
+    reconciliationRequired: true,
+    operation: exactOperation,
+  });
+  assert.deepEqual(matching.sourceRevisionObservation, {
+    kind: "exact_source_revision_matches",
+    expectedSha,
+    observedSha: expectedSha,
+  });
+  assert.equal(matching.mutationAllowed, false);
+  assert.equal(matching.automaticResolutionAllowed, false);
+
+  const differentSha = "b".repeat(40);
+  const differing = await assessBranchWriteReconciliation(provider([
+    { name: exactOperation.branch.name, sha: differentSha, protected: false },
+  ]), {
+    operationId: "operation-exact-differs",
+    state: "uncertain",
+    observedAt,
+    reconciliationRequired: true,
+    operation: exactOperation,
+  });
+  assert.deepEqual(differing.sourceRevisionObservation, {
+    kind: "exact_source_revision_differs",
+    expectedSha,
+    observedSha: differentSha,
+  });
+  assert.equal(differing.assessment, "provider_branch_present");
+  assert.equal(differing.manualReviewRequired, true);
+  assert.equal(differing.mutationAllowed, false);
+  assert.equal(differing.automaticResolutionAllowed, false);
 });
 
 test("fails closed when provider observation contains duplicate target branches", async () => {
