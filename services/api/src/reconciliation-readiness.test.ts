@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   assessReconciliationReadiness,
   type ReconciliationReadinessInput,
-} from "./reconciliation-readiness.js";
+} from "./reconciliation-readiness.ts";
 
 const satisfied: ReconciliationReadinessInput = {
   application_authorization: true,
