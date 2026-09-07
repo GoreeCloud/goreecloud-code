@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assessReconciliationEvidenceBinding } from "./reconciliation-evidence-binding.js";
+import { assessReconciliationEvidenceBinding } from "./reconciliation-evidence-binding.ts";
 
 const EXPECTED_OPERATION = "op-20260907-001";
 const EXPECTED_KIND = "provider-observation";
