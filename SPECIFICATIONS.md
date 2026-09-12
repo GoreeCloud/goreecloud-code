@@ -1,0 +1,98 @@
+# GoreeCloud Code Specifications
+
+## Product boundary
+
+GoreeCloud Code is original GoreeCloud-owned source-control and developer-platform software. Forgejo is the preferred initial replaceable forge infrastructure; GoreeCloud Code owns the product API, provider-neutral contracts, governance, evidence boundaries, and user experience.
+
+## Current development state
+
+- Milestone 1 Forgejo connectivity remains in progress pending recorded real-instance validation.
+- The first Milestone 2 write is provider-neutral branch creation.
+- Branch writes require server-side Forgejo permission, a separate application authorization secret, a mandatory application audit sink, and a mandatory idempotency/reconciliation journal.
+- Protected read-only governed-write status and reconciliation-assessment routes expose bounded operation/provider observations without authorizing retry or state mutation.
+- New idempotency journal rows use version 2 with a data-minimized branch-write operation descriptor; legacy version-1 rows remain readable without invented operation context.
+- The Forgejo validator can optionally exercise one explicitly selected live branch create, same-key idempotent replay, and provider-neutral branch readback without adding branch-deletion authority.
+- Issue mutation, pull-request mutation, package publication, pipeline writes, authoritative reconciliation mutation, and AI-assisted writes are not enabled by this slice.
+
+## Runtime architecture
+
+`Glaze UI client -> GoreeCloud Code API -> ForgeProvider -> ForgejoProvider`
+
+The browser receives no Forgejo credentials and does not depend directly on Forgejo-specific APIs.
+
+## Governed branch-write contract
+
+`POST /api/v1/repositories/:owner/:name/branches`
+
+Required development controls:
+
+- `FORGEJO_TOKEN` with minimum provider permissions;
+- `GOREECLOUD_CODE_WRITE_TOKEN_FILE` for the interim application bearer gate;
+- `GOREECLOUD_CODE_AUDIT_LOG_FILE` for data-minimized pre/outcome evidence;
+- `GOREECLOUD_CODE_IDEMPOTENCY_FILE` for replay safety and reconciliation state; and
+- an `Idempotency-Key` request header.
+
+Raw idempotency keys are SHA-256 hashed before persistence. Successful matching requests replay the stored result without a second provider mutation. Conflicting or unresolved requests fail closed. Provider uncertainty requires reconciliation rather than blind retry.
+
+Version-2 journal rows persist only the branch-create action, normalized repository owner/name, branch name, and source ref as reconciliation-safe operation context. Version-1 rows remain supported for reads and blocking behavior, but absence of context is preserved rather than reconstructed from guesses.
+
+These local files are development foundations. They are not production GoreeCloud Identity authorization, Wardveil Audit, Mesh evidence delivery, distributed idempotency, or production incident reconstruction.
+
+## Governed-write status contract
+
+`GET /api/v1/governed-writes/:operationId`
+
+The route accepts canonical UUID operation IDs returned by governed writes and requires the same interim GoreeCloud Code application bearer gate. It reads the configured idempotency journal and may report:
+
+- `in_progress`;
+- `succeeded`; or
+- `uncertain`.
+
+The response includes the operation ID, latest observation time, `reconciliationRequired`, version-2 operation context when available, and the stored branch result only for a succeeded operation. It deliberately excludes raw idempotency keys, key hashes/fingerprints, authorization credentials, provider credentials, and persisted provider-failure reasons.
+
+## Read-only reconciliation-assessment contract
+
+`GET /api/v1/governed-writes/:operationId/reconciliation`
+
+The route uses the same authorization and local operation lookup. For unresolved version-2 branch writes it may call only the provider-neutral branch-list read for the recorded repository and compare the recorded target branch name. Possible assessment values are:
+
+- `not_required`;
+- `legacy_operation_context_unavailable`;
+- `provider_branch_present`;
+- `provider_branch_absent`; and
+- `provider_observation_unavailable`.
+
+Every assessment is non-authorizing. `mutationAllowed` and `automaticResolutionAllowed` are always `false`. Branch presence does not change the journal state to succeeded; branch absence does not authorize another create request. Provider observation failure is sanitized rather than returning private upstream error detail. A version-1 operation without safe context remains manual-review-required without a provider call.
+
+An authoritative reconciliation mutation would require its own authorization, durable evidence, concurrency/distributed-state, policy, and rollback design and is not implemented here.
+
+## Live validation contract
+
+`pnpm validate:forgejo` always supports the existing read-path validation. Live branch-write validation is opt-in and requires an explicit `VALIDATE_REPOSITORY`, `VALIDATE_WRITE_BRANCH`, `VALIDATE_WRITE_SOURCE_REF`, and protected `GOREECLOUD_CODE_WRITE_TOKEN`. `VALIDATE_WRITE_IDEMPOTENCY_KEY` may be supplied; otherwise the validator generates a bounded random key.
+
+When the write path is enabled, the validator must:
+
+1. create the explicitly selected validation branch through GoreeCloud Code;
+2. repeat the identical request with the same idempotency key and receive a replay using the same operation ID;
+3. confirm the branch through the provider-neutral branch-read endpoint.
+
+The validator must not log reusable provider/application credentials or the raw idempotency key. It intentionally does not delete the validation branch because branch-deletion authority is not implemented by this milestone.
+
+A successful validator run is target-specific interoperability evidence only. It does not establish Identity-backed authorization, Wardveil/Privacy Shield/Everkeep acceptance, distributed reconciliation, least privilege, deployment acceptance, or Stable qualification.
+
+## Platform-system requirements
+
+- **Glaze UI:** current mandatory consumer target is Stable **GLAZE UI V1.1 / 1.1.0**. GoreeCloud Code remains migration/reconciliation-required until exact-revision 1.1.0 consumer conformance is completed; existing 2.x-labeled source is historical migration input and is not current conformance evidence.
+- **Wardveil Security:** repository/write security policy, authoritative audit/evidence, runner/artifact protections, and production acceptance remain incomplete.
+- **Privacy Shield:** data-use/minimization authority remains separate; current application logs/status/reconciliation output deliberately exclude reusable credentials and unnecessary private payloads, but Privacy Shield runtime acceptance is not established.
+- **Everkeep:** repository/application continuity, backup, restore, portability, and recovery evidence require an application-specific acceptance contract and remain incomplete.
+- **GoreeCloud Identity:** Identity supplies authenticated identity/claims while GoreeCloud Code remains responsible for application authorization. Final actor/session/service integration is pending; the current secret-file bearer is interim development infrastructure.
+- **GoreeCloud Mesh:** coordination and evidence transport remain pending and must not manufacture security/privacy/continuity truth.
+
+## Validation
+
+Repository CI performs strict TypeScript checking, deterministic provider/API tests, governed-write audit/idempotency/status/reconciliation tests, builds, and syntax validation for the Forgejo target-validation tool. Live Forgejo read/write interoperability remains a separate target-environment validation gate and must be recorded before it changes milestone acceptance state.
+
+## Stable boundary
+
+GoreeCloud Code is not Stable or production-accepted. Stable qualification requires migration/reconciliation to current Stable GLAZE UI V1.1 / 1.1.0 and product-specific consumer acceptance plus applicable Wardveil, Privacy Shield, Everkeep, Identity, Mesh, live Forgejo, least-privilege, deployment, reconciliation, and recovery evidence.

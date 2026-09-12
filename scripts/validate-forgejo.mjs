@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto";
+
 const forgejoBaseUrl = required("FORGEJO_BASE_URL").replace(/\/$/, "");
 const goreeCloudApiUrl = (process.env.GOREECLOUD_CODE_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const token = process.env.FORGEJO_TOKEN?.trim();
 const repository = process.env.VALIDATE_REPOSITORY?.trim();
+const writeBranch = process.env.VALIDATE_WRITE_BRANCH?.trim();
 
 const headers = token ? { Authorization: `token ${token}` } : {};
 
-console.log("GoreeCloud Code M1 validation");
+console.log("GoreeCloud Code Forgejo validation");
 console.log(`Forgejo: ${forgejoBaseUrl}`);
 console.log(`GoreeCloud Code API: ${goreeCloudApiUrl}`);
 
@@ -31,6 +34,7 @@ const repositories = await step("Repository discovery through GoreeCloud Code", 
 console.log(`  visible repositories: ${repositories.length}`);
 
 if (!repository) {
+  assert(!writeBranch, "VALIDATE_REPOSITORY=owner/name is required when VALIDATE_WRITE_BRANCH is set");
   console.log("\nPartial validation complete.");
   console.log("Set VALIDATE_REPOSITORY=owner/name to exercise repository detail, branches, commits, issues, and pull requests.");
   process.exit(0);
@@ -63,6 +67,51 @@ await step("Pull requests", async () => {
 });
 
 console.log("\nM1 read-path validation passed.");
+
+if (!writeBranch) {
+  console.log("M2 write validation skipped.");
+  console.log("Set VALIDATE_WRITE_BRANCH, VALIDATE_WRITE_SOURCE_REF, and GOREECLOUD_CODE_WRITE_TOKEN only when an operator has selected a disposable validation branch.");
+  process.exit(0);
+}
+
+const writeSourceRef = required("VALIDATE_WRITE_SOURCE_REF");
+const writeToken = required("GOREECLOUD_CODE_WRITE_TOKEN");
+const idempotencyKey = process.env.VALIDATE_WRITE_IDEMPOTENCY_KEY?.trim() || `validation-${randomUUID()}`;
+assert(/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey), "VALIDATE_WRITE_IDEMPOTENCY_KEY must satisfy the GoreeCloud Code Idempotency-Key contract");
+
+const writeUrl = `${goreeCloudApiUrl}/api/v1/repositories/${encoded}/branches`;
+const writeBody = JSON.stringify({ name: writeBranch, sourceRef: writeSourceRef });
+const writeHeaders = {
+  Authorization: `Bearer ${writeToken}`,
+  "Content-Type": "application/json",
+  "Idempotency-Key": idempotencyKey,
+};
+
+const created = await step("M2 governed branch creation", async () => {
+  const response = await json(writeUrl, { method: "POST", headers: writeHeaders, body: writeBody });
+  assert(response?.branch?.name === writeBranch, "created branch name did not match the requested validation branch");
+  assert(typeof response.operationId === "string" && response.operationId.length > 0, "governed write did not return an operation ID");
+  assert(response?.idempotency?.replayed === false, "first governed write unexpectedly reported an idempotency replay");
+  return response;
+});
+
+await step("M2 idempotent replay", async () => {
+  const response = await json(writeUrl, { method: "POST", headers: writeHeaders, body: writeBody });
+  assert(response?.branch?.name === writeBranch, "replayed branch result did not match the requested validation branch");
+  assert(response.operationId === created.operationId, "idempotent replay returned a different operation ID");
+  assert(response?.idempotency?.replayed === true, "second governed write did not report an idempotency replay");
+  return "same operation replayed without a second mutation";
+});
+
+await step("Created branch visible through GoreeCloud Code", async () => {
+  const response = await json(`${goreeCloudApiUrl}/api/v1/repositories/${encoded}/branches`);
+  assert(Array.isArray(response.branches), "branches payload is invalid after governed write");
+  assert(response.branches.some((branch) => branch?.name === writeBranch), "created validation branch is not visible through the provider-neutral read path");
+  return writeBranch;
+});
+
+console.log("\nM2 governed branch-write validation passed.");
+console.log("The validation branch is intentionally retained for operator review; this tool does not add or exercise branch deletion authority.");
 
 async function step(label, task) {
   process.stdout.write(`- ${label} ... `);

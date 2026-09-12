@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "build": "pnpm -r build",
-    "check": "pnpm -r check",
+    "check": "pnpm -r check && node --check scripts/validate-forgejo.mjs",
     "test": "pnpm -r test",
     "validate:forgejo": "node scripts/validate-forgejo.mjs"
   },

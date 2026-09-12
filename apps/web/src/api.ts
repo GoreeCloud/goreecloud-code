@@ -31,7 +31,10 @@ export interface RepositoryDetails {
   }>;
 }
 
-const apiBaseUrl = (import.meta.env.VITE_GOREECLOUD_CODE_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
+const environment = (import.meta as ImportMeta & {
+  env?: { VITE_GOREECLOUD_CODE_API_URL?: string };
+}).env;
+const apiBaseUrl = (environment?.VITE_GOREECLOUD_CODE_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 
 export class GoreeCloudCodeApi {
   async provider(): Promise<ProviderHealth> {
@@ -67,10 +70,12 @@ export class GoreeCloudCodeApi {
       headers: { accept: "application/json" },
     });
 
-    const data = (await response.json().catch(() => null)) as T | { message?: string } | null;
+    const data: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      const message = data && "message" in data && data.message ? data.message : `Request failed with ${response.status}`;
-      throw new Error(message);
+      const apiMessage = data && typeof data === "object" && "message" in data
+        ? (data as { message?: unknown }).message
+        : undefined;
+      throw new Error(typeof apiMessage === "string" && apiMessage ? apiMessage : `Request failed with ${response.status}`);
     }
 
     return data as T;

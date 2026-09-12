@@ -4,10 +4,11 @@ import {
   type ProviderHealth,
   type Repository,
   type RepositoryDetails,
-} from "./api";
+} from "./api.js";
 
-const app = document.querySelector<HTMLDivElement>("#app");
-if (!app) throw new Error("GoreeCloud Code root element is missing");
+const root = document.querySelector<HTMLDivElement>("#app");
+if (!root) throw new Error("GoreeCloud Code root element is missing");
+const app: HTMLDivElement = root;
 
 let repositories: Repository[] = [];
 let provider: ProviderHealth | null = null;
@@ -189,10 +190,11 @@ function renderRepositoryDetails(): string {
     return `<div class="empty-detail"><p class="eyebrow">Repository details</p><h3>Select a repository</h3><p>Repository activity, branches, issues, changes, and security evidence will appear here.</p></div>`;
   }
 
+  const repository = selectedRepository;
   const header = `
     <div class="detail-heading">
-      <div><p class="eyebrow">Repository</p><h3>${escapeHtml(selectedRepository.name)}</h3><p>${escapeHtml(selectedRepository.description ?? "No repository description")}</p></div>
-      <span class="visibility">${selectedRepository.private ? "Private" : "Public"}</span>
+      <div><p class="eyebrow">Repository</p><h3>${escapeHtml(repository.name)}</h3><p>${escapeHtml(repository.description ?? "No repository description")}</p></div>
+      <span class="visibility">${repository.private ? "Private" : "Public"}</span>
     </div>`;
 
   if (detailLoading) {
@@ -204,22 +206,23 @@ function renderRepositoryDetails(): string {
   }
 
   if (!selectedDetails) return header;
+  const details = selectedDetails;
 
-  const openIssues = selectedDetails.issues.filter((issue) => issue.state === "open").length;
-  const openPullRequests = selectedDetails.pullRequests.filter((pullRequest) => pullRequest.state === "open").length;
-  const latestCommit = selectedDetails.commits[0];
+  const openIssues = details.issues.filter((issue) => issue.state === "open").length;
+  const openPullRequests = details.pullRequests.filter((pullRequest) => pullRequest.state === "open").length;
+  const latestCommit = details.commits[0];
 
   return `
     ${header}
     <div class="detail-grid">
-      <div><span>Branches</span><strong>${selectedDetails.branches.length}</strong></div>
+      <div><span>Branches</span><strong>${details.branches.length}</strong></div>
       <div><span>Open issues</span><strong>${openIssues}</strong></div>
       <div><span>Open changes</span><strong>${openPullRequests}</strong></div>
-      <div><span>Default branch</span><strong>${escapeHtml(selectedDetails.repository.defaultBranch)}</strong></div>
+      <div><span>Default branch</span><strong>${escapeHtml(details.repository.defaultBranch)}</strong></div>
     </div>
     <section class="activity-section">
-      <div class="activity-heading"><strong>Recent commits</strong><span>${selectedDetails.commits.length}</span></div>
-      ${selectedDetails.commits.length ? `<div class="activity-list">${selectedDetails.commits.slice(0, 5).map((commit) => `
+      <div class="activity-heading"><strong>Recent commits</strong><span>${details.commits.length}</span></div>
+      ${details.commits.length ? `<div class="activity-list">${details.commits.slice(0, 5).map((commit) => `
         <a class="activity-row" href="${escapeAttribute(commit.webUrl)}" target="_blank" rel="noreferrer">
           <span class="commit-sha">${escapeHtml(commit.sha.slice(0, 7))}</span>
           <span><strong>${escapeHtml(firstLine(commit.message))}</strong><small>${formatDate(commit.authoredAt)}</small></span>
@@ -227,30 +230,30 @@ function renderRepositoryDetails(): string {
     </section>
     <section class="activity-section split-activity">
       <div>
-        <div class="activity-heading"><strong>Issues</strong><span>${selectedDetails.issues.length}</span></div>
-        ${renderIssueList()}
+        <div class="activity-heading"><strong>Issues</strong><span>${details.issues.length}</span></div>
+        ${renderIssueList(details)}
       </div>
       <div>
-        <div class="activity-heading"><strong>Changes</strong><span>${selectedDetails.pullRequests.length}</span></div>
-        ${renderPullRequestList()}
+        <div class="activity-heading"><strong>Changes</strong><span>${details.pullRequests.length}</span></div>
+        ${renderPullRequestList(details)}
       </div>
     </section>
     <div class="detail-actions">
-      <a class="button-link" href="${escapeAttribute(selectedRepository.webUrl)}" target="_blank" rel="noreferrer">Open provider repository</a>
+      <a class="button-link" href="${escapeAttribute(repository.webUrl)}" target="_blank" rel="noreferrer">Open provider repository</a>
       ${latestCommit ? `<span class="latest-commit">Latest ${escapeHtml(latestCommit.sha.slice(0, 7))}</span>` : ""}
     </div>
     <div class="boundary-note"><strong>GoreeCloud boundary</strong><p>This UI consumes GoreeCloud Code contracts, not Forgejo-specific browser APIs or credentials.</p></div>`;
 }
 
-function renderIssueList(): string {
-  if (!selectedDetails?.issues.length) return `<p class="muted">No issues returned.</p>`;
-  return `<div class="mini-list">${selectedDetails.issues.slice(0, 4).map((issue) => `
+function renderIssueList(details: RepositoryDetails): string {
+  if (!details.issues.length) return `<p class="muted">No issues returned.</p>`;
+  return `<div class="mini-list">${details.issues.slice(0, 4).map((issue) => `
     <a href="${escapeAttribute(issue.webUrl)}" target="_blank" rel="noreferrer"><span>#${issue.number}</span><strong>${escapeHtml(issue.title)}</strong><small>${issue.state}</small></a>`).join("")}</div>`;
 }
 
-function renderPullRequestList(): string {
-  if (!selectedDetails?.pullRequests.length) return `<p class="muted">No changes returned.</p>`;
-  return `<div class="mini-list">${selectedDetails.pullRequests.slice(0, 4).map((pullRequest) => `
+function renderPullRequestList(details: RepositoryDetails): string {
+  if (!details.pullRequests.length) return `<p class="muted">No changes returned.</p>`;
+  return `<div class="mini-list">${details.pullRequests.slice(0, 4).map((pullRequest) => `
     <a href="${escapeAttribute(pullRequest.webUrl)}" target="_blank" rel="noreferrer"><span>#${pullRequest.number}</span><strong>${escapeHtml(pullRequest.title)}</strong><small>${pullRequest.state}</small></a>`).join("")}</div>`;
 }
 
